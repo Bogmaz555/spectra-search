@@ -1,0 +1,293 @@
+import type { SearchHit, SourceResult, SpectraAi } from "@/lib/scrape/types";
+
+export function hasXaiKey(): boolean {
+  return Boolean(process.env.XAI_API_KEY?.trim());
+}
+
+export function getXaiStatus(): {
+  available: boolean;
+  model: string;
+  note: string;
+} {
+  const available = hasXaiKey();
+  return {
+    available,
+    model: "grok-4.5",
+    note: available
+      ? "Grok syntezuje odpowiedź z wyciągniętych źródeł"
+      : "Ustaw XAI_API_KEY na Vercel, aby włączyć syntezę Grok",
+  };
+}
+
+/** Cap payload size so we don't burn tokens on full page dumps */
+function packSources(sources: SourceResult[], hits: SearchHit[]): string {
+  const hitLines = hits
+    .slice(0, 8)
+    .map((h, i) => `${i + 1}. [${h.title}](${h.url}) — ${h.snippet.slice(0, 160)}`)
+    .join("\n");
+
+  const sourceBlocks = sources.slice(0, 3).map((s, i) => {
+    const md = s.markdown.slice(0, 2800);
+    const struct = s.structured
+      .slice(0, 12)
+      .map((f) => `${f.key}: ${f.value}`)
+      .join("\n");
+    return [
+      `### Źródło ${i + 1}: ${s.title}`,
+      `URL: ${s.url}`,
+      `HTTP ${s.statusCode} · ${s.wordCount} słów`,
+      s.description ? `Opis: ${s.description}` : "",
+      struct ? `Pola:\n${struct}` : "",
+      md ? `Treść (skrót):\n${md}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
+
+  return [`## Discovery\n${hitLines || "(brak)"}`, ...sourceBlocks].join("\n\n");
+}
+
+export async function synthesizeWithGrok(input: {
+  query: string;
+  mode: string;
+  hits: SearchHit[];
+  sources: SourceResult[];
+}): Promise<SpectraAi> {
+  const apiKey = process.env.XAI_API_KEY?.trim();
+  if (!apiKey) {
+    return {
+      enabled: false,
+      used: false,
+      model: "grok-4.5",
+      answer: "",
+      keyPoints: [],
+      confidence: 0,
+      citations: [],
+      error: "Brak XAI_API_KEY — dodaj klucz w ustawieniach Vercel",
+    };
+  }
+
+  if (input.sources.length === 0 && input.hits.length === 0) {
+    return {
+      enabled: true,
+      used: false,
+      model: "grok-4.5",
+      answer: "",
+      keyPoints: [],
+      confidence: 0,
+      citations: [],
+      error: "Brak źródeł do syntezy",
+    };
+  }
+
+  const context = packSources(input.sources, input.hits);
+  const system = [
+    "Jesteś warstwą inteligencji portalu SPECTRA.",
+    "Na podstawie WYŁĄCZNIE podanych źródeł przygotuj zwięzłą odpowiedź po polsku.",
+    "Nie wymyślaj faktów spoza źródeł. Jeśli coś jest niepewne — napisz to.",
+    "Cytuj źródła po tytule/URL gdy to możliwe.",
+    "Zwróć WYŁĄCZNIE poprawny JSON (bez markdown fences) o schemacie:",
+    '{ "answer": "string (2-5 akapitów markdown)", "keyPoints": ["..."], "confidence": 0.0-1.0, "citations": [{"title":"...","url":"..."}] }',
+  ].join(" ");
+
+  const user = [
+    `Zapytanie użytkownika: ${input.query}`,
+    `Tryb: ${input.mode}`,
+    "",
+    "Źródła zebrane przez pipeline crawlerów:",
+    context,
+  ].join("\n");
+
+  try {
+    const res = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "grok-4.5",
+        temperature: 0.2,
+        max_tokens: 1200,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return {
+        enabled: true,
+        used: false,
+        model: "grok-4.5",
+        answer: "",
+        keyPoints: [],
+        confidence: 0,
+        citations: [],
+        error: `xAI API ${res.status}${errText ? `: ${errText.slice(0, 120)}` : ""}`,
+      };
+    }
+
+    const body = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const raw = body.choices?.[0]?.message?.content?.trim() ?? "";
+    const parsed = parseAiJson(raw, input.hits, input.sources);
+
+    return {
+      enabled: true,
+      used: true,
+      model: "grok-4.5",
+      answer: parsed.answer,
+      keyPoints: parsed.keyPoints,
+      confidence: parsed.confidence,
+      citations: parsed.citations,
+    };
+  } catch (e) {
+    return {
+      enabled: true,
+      used: false,
+      model: "grok-4.5",
+      answer: "",
+      keyPoints: [],
+      confidence: 0,
+      citations: [],
+      error: e instanceof Error ? e.message : "Błąd wywołania xAI",
+    };
+  }
+}
+
+function parseAiJson(
+  raw: string,
+  hits: SearchHit[],
+  sources: SourceResult[],
+): {
+  answer: string;
+  keyPoints: string[];
+  confidence: number;
+  citations: { title: string; url: string }[];
+} {
+  const fallbackCitations = [
+    ...sources.map((s) => ({ title: s.title, url: s.url })),
+    ...hits.map((h) => ({ title: h.title, url: h.url })),
+  ].slice(0, 6);
+
+  try {
+    let text = raw.trim();
+    if (text.startsWith("```")) {
+      text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    }
+    const data = JSON.parse(text) as {
+      answer?: string;
+      keyPoints?: string[];
+      confidence?: number;
+      citations?: { title?: string; url?: string }[];
+    };
+    return {
+      answer: (data.answer || raw).trim(),
+      keyPoints: Array.isArray(data.keyPoints)
+        ? data.keyPoints.map(String).filter(Boolean).slice(0, 8)
+        : [],
+      confidence: clamp01(Number(data.confidence) || 0.55),
+      citations:
+        Array.isArray(data.citations) && data.citations.length
+          ? data.citations
+              .filter((c) => c?.url)
+              .map((c) => ({ title: String(c.title || c.url), url: String(c.url) }))
+              .slice(0, 8)
+          : fallbackCitations,
+    };
+  } catch {
+    return {
+      answer: raw || "Nie udało się sparsować odpowiedzi modelu.",
+      keyPoints: [],
+      confidence: 0.4,
+      citations: fallbackCitations,
+    };
+  }
+}
+
+function clamp01(n: number): number {
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+/** Heuristic effectiveness score without LLM */
+export function scoreEffectiveness(input: {
+  hits: SearchHit[];
+  sources: SourceResult[];
+  resolvedMode: string;
+}): {
+  score: number;
+  grade: "A" | "B" | "C" | "D" | "F";
+  factors: { label: string; ok: boolean; detail: string }[];
+} {
+  const factors: { label: string; ok: boolean; detail: string }[] = [];
+  let points = 0;
+  let max = 0;
+
+  const add = (label: string, ok: boolean, weight: number, detail: string) => {
+    max += weight;
+    if (ok) points += weight;
+    factors.push({ label, ok, detail });
+  };
+
+  add(
+    "Discovery",
+    input.hits.length > 0,
+    20,
+    input.hits.length
+      ? `${input.hits.length} trafień (Wikipedia / DuckDuckGo / URL)`
+      : "Brak wyników discovery",
+  );
+
+  const okSources = input.sources.filter((s) => s.statusCode > 0 && s.statusCode < 400);
+  add(
+    "Pobranie stron",
+    okSources.length > 0,
+    25,
+    okSources.length
+      ? `${okSources.length}/${input.sources.length} źródeł HTTP OK`
+      : "Żadne źródło nie zostało pobrane (blokada / timeout)",
+  );
+
+  const words = okSources.reduce((s, x) => s + x.wordCount, 0);
+  add(
+    "Treść",
+    words >= 80,
+    20,
+    words ? `${words.toLocaleString("pl-PL")} słów w markdown` : "Pusta treść",
+  );
+
+  const structured = okSources.reduce((s, x) => s + x.structured.length, 0);
+  add(
+    "Struktura",
+    structured >= 3,
+    15,
+    structured ? `${structured} pól meta/schema` : "Brak pól strukturalnych",
+  );
+
+  const patterns = okSources.reduce((s, x) => s + x.patterns.length, 0);
+  add(
+    "Wzorce",
+    patterns > 0,
+    10,
+    patterns ? `${patterns} grup wzorców` : "Brak powtarzalnych list",
+  );
+
+  const links = okSources.reduce((s, x) => s + x.links.length, 0);
+  add(
+    "Graf linków",
+    links >= 5,
+    10,
+    links ? `${links} linków do dalszego crawla` : "Mało linków",
+  );
+
+  const score = max ? Math.round((points / max) * 100) : 0;
+  const grade: "A" | "B" | "C" | "D" | "F" =
+    score >= 85 ? "A" : score >= 70 ? "B" : score >= 55 ? "C" : score >= 40 ? "D" : "F";
+
+  return { score, grade, factors };
+}
