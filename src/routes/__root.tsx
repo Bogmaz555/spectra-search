@@ -20,7 +20,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "SPECTRA — kompleksowy portal wyszukiwania łączący 10 open-source silników crawlingu w jeden pipeline.",
+          "SPECTRA — wyszukiwanie wieloźródłowe i równoległy crawl. Adaptery pokazują, co działa na żywo, co jest aproksymacją, a co jest niedostępne.",
       },
       { name: "apple-mobile-web-app-title", content: "SPECTRA" },
       { name: "theme-color", content: "#07080a" },

@@ -239,7 +239,7 @@ export function scoreEffectiveness(input: {
     input.hits.length > 0,
     20,
     input.hits.length
-      ? `${input.hits.length} trafień (Wikipedia / DuckDuckGo / URL)`
+      ? `${input.hits.length} trafień z wielu źródeł`
       : "Brak wyników discovery",
   );
 

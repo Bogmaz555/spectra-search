@@ -1,4 +1,4 @@
-import { Check, Circle, Loader2, Minus } from "lucide-react";
+import { AlertTriangle, Check, Circle, Loader2, Minus } from "lucide-react";
 import { ENGINES, ENGINE_MAP, type EngineId } from "@/lib/engines";
 import type { EngineRun } from "@/lib/scrape/types";
 import { cn, formatDuration } from "@/lib/utils";
@@ -33,9 +33,9 @@ export function EnginePipeline({
     <div className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight text-fg">Pipeline silników</h2>
+          <h2 className="text-sm font-semibold tracking-tight text-fg">Adaptery</h2>
           <p className="text-xs text-fg-subtle">
-            10 repozytoriów w spójnym łańcuchu ekstrakcji
+            Live = prawdziwe API. Aproksymacja jest podpisana. Reszta jest pominięta.
           </p>
         </div>
         {simulating && (
@@ -61,7 +61,8 @@ export function EnginePipeline({
                 "flex items-start gap-3 rounded-[var(--radius-lg)] border border-border/80 bg-bg-elevated/80 p-3 transition-opacity duration-200",
                 !isEnabled && "opacity-40",
                 status === "running" && "border-signal/40",
-                status === "done" && "border-success/25",
+                status === "live" && "border-success/25",
+                status === "degraded" && "border-warn/40",
                 status === "error" && "border-danger/30",
               )}
             >
@@ -78,12 +79,13 @@ export function EnginePipeline({
                   <p className="truncate text-sm font-medium text-fg">{engine.name}</p>
                   <StatusIcon status={status} />
                 </div>
-                <p className="mt-0.5 line-clamp-1 text-xs text-fg-subtle">
-                  {run?.message || engine.pipelineStep}
+                <p className="mt-0.5 line-clamp-2 text-xs text-fg-subtle">
+                  {run?.message || engine.runtimeNote}
                 </p>
-                {run && run.status === "done" && (
+                {run && (run.status === "live" || run.status === "degraded" || run.status === "error") && (
                   <p className="mt-1 font-mono text-[10px] text-fg-subtle">
-                    {formatDuration(run.durationMs)}
+                    {statusLabel(run.status)}
+                    {run.durationMs ? ` · ${formatDuration(run.durationMs)}` : ""}
                     {run.itemsFound != null ? ` · ${run.itemsFound} el.` : ""}
                   </p>
                 )}
@@ -96,10 +98,20 @@ export function EnginePipeline({
   );
 }
 
+function statusLabel(status: string): string {
+  if (status === "live") return "live";
+  if (status === "degraded") return "aproksymacja";
+  if (status === "error") return "błąd";
+  if (status === "skipped") return "pominięty";
+  return status;
+}
+
 function StatusIcon({ status }: { status: string }) {
   if (status === "running")
     return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-signal" />;
-  if (status === "done") return <Check className="h-3.5 w-3.5 shrink-0 text-success" />;
+  if (status === "live") return <Check className="h-3.5 w-3.5 shrink-0 text-success" />;
+  if (status === "degraded")
+    return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" />;
   if (status === "error") return <Circle className="h-3.5 w-3.5 shrink-0 text-danger" />;
   if (status === "skipped") return <Minus className="h-3.5 w-3.5 shrink-0 text-fg-subtle" />;
   return <Circle className="h-3.5 w-3.5 shrink-0 text-fg-subtle/50" />;

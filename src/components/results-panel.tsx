@@ -117,6 +117,36 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="min-w-0 space-y-6">
+          {result.discovery.length > 0 && (
+            <section className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
+              <h3 className="mb-3 text-sm font-semibold text-fg">Źródła discovery</h3>
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {result.discovery.map((run) => (
+                  <li
+                    key={run.id}
+                    className="rounded-[var(--radius-lg)] border border-border/80 bg-bg-elevated px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-fg">{run.label}</p>
+                      <Badge
+                        variant={
+                          run.status === "live" ? "success" : run.status === "error" ? "danger" : "default"
+                        }
+                      >
+                        {run.status === "live"
+                          ? `${run.hits}`
+                          : run.status === "error"
+                            ? "błąd"
+                            : "pominięte"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">{run.message}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {result.hits.length > 0 && (
             <section className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
               <h3 className="mb-3 text-sm font-semibold text-fg">Wyniki discovery</h3>
@@ -139,7 +169,7 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
                           <p className="mt-1 line-clamp-2 text-xs text-fg-muted">{hit.snippet}</p>
                         )}
                       </div>
-                      <Badge variant="default" className="ml-auto shrink-0 capitalize">
+                      <Badge variant="default" className="ml-auto max-w-[9rem] shrink-0 truncate">
                         {hit.source}
                       </Badge>
                     </a>
