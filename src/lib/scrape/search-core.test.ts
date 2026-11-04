@@ -11,7 +11,15 @@ import {
   parseFirecrawlPayload,
 } from "./adapters.ts";
 import { parseArxiv, parseDuckDuckGoHtml } from "./discovery.ts";
-import { ipIsPrivate, isPublicHttpUrl, looksBlocked, robotsDisallows } from "./http.ts";
+import {
+  clearRobotsCache,
+  ipIsPrivate,
+  isPublicHttpUrl,
+  isPublicHttpUrlResolved,
+  looksBlocked,
+  resilientGet,
+  robotsDisallows,
+} from "./http.ts";
 import { resolveMode } from "./mode.ts";
 import { canonicalUrl, dedupeHits, fuseHits, selectDiverse } from "./rank.ts";
 
@@ -91,6 +99,77 @@ test("private hosts and non-http URLs are rejected", () => {
   assert.equal(isPublicHttpUrl("https://example.com/docs"), true);
   assert.equal(isPublicHttpUrl("file:///etc/passwd"), false);
   assert.equal(isPublicHttpUrl("https://user:pass@example.com/"), false);
+
+  assert.equal(ipIsPrivate("::"), true);
+  assert.equal(ipIsPrivate("::1"), true);
+  assert.equal(ipIsPrivate("::ffff:127.0.0.1"), true);
+  assert.equal(ipIsPrivate("::ffff:7f00:1"), true);
+  assert.equal(ipIsPrivate("::ffff:a9fe:a9fe"), true);
+  assert.equal(ipIsPrivate("::ffff:8.8.8.8"), false);
+  assert.equal(ipIsPrivate("::ffff:808:808"), false);
+  assert.equal(ipIsPrivate("2001:4860:4860::8888"), false);
+
+  assert.equal(isPublicHttpUrl("http://[::ffff:7f00:1]/"), false);
+  assert.equal(isPublicHttpUrl("http://[::ffff:a9fe:a9fe]/latest/meta-data"), false);
+  assert.equal(isPublicHttpUrl("http://[::ffff:127.0.0.1]/"), false);
+  assert.equal(isPublicHttpUrl("http://[::]/"), false);
+  assert.equal(isPublicHttpUrl("http://127.0.0.1.nip.io/"), false);
+  assert.equal(isPublicHttpUrl("http://customer.127.0.0.1.nip.io/latest"), false);
+  assert.equal(isPublicHttpUrl("http://localtest.me/"), false);
+  assert.equal(isPublicHttpUrl("http://app.localtest.me/admin"), false);
+  assert.equal(isPublicHttpUrl("https://[2001:4860:4860::8888]/"), true);
+});
+
+test("DNS answers that point at private or mapped addresses are rejected", async () => {
+  const lookup = async (host: string) => {
+    if (host === "mapped.example") return ["::ffff:a9fe:a9fe"];
+    if (host === "loop.example") return ["::ffff:7f00:1"];
+    if (host === "ok.example") return ["93.184.216.34", "2001:4860:4860::8888"];
+    return ["10.1.2.3"];
+  };
+  assert.equal(await isPublicHttpUrlResolved("https://mapped.example/latest/meta-data", lookup), false);
+  assert.equal(await isPublicHttpUrlResolved("https://loop.example/", lookup), false);
+  assert.equal(await isPublicHttpUrlResolved("https://internal.example/", lookup), false);
+  assert.equal(await isPublicHttpUrlResolved("https://ok.example/docs", lookup), true);
+  assert.equal(
+    await isPublicHttpUrlResolved("https://ok.example/", async () => {
+      throw new Error("dns down");
+    }),
+    false,
+  );
+});
+
+test("robots.txt redirect to a private target is not fetched", async () => {
+  clearRobotsCache();
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url === "https://example.com/robots.txt") {
+      return new Response("", {
+        status: 302,
+        headers: { location: "http://evil.example/meta" },
+      });
+    }
+    return new Response("<html><title>Docs</title><p>Public page body for the crawler test.</p></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+  };
+  const lookup = async (host: string) => {
+    if (host === "evil.example") return ["::ffff:7f00:1"];
+    return ["93.184.216.34"];
+  };
+  const result = await resilientGet("https://example.com/docs", {
+    fetchImpl,
+    lookup,
+    respectRobots: true,
+    timeoutMs: 2000,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.includes("http://evil.example/meta"), false);
+  assert.equal(calls.some((url) => url.includes("127.0.0.1") || url.includes("7f00")), false);
+  clearRobotsCache();
 });
 
 test("robots.txt longest match and challenge detection", () => {

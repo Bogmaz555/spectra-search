@@ -40,22 +40,102 @@ export interface HttpResult {
   error?: string;
 }
 
-export function ipIsPrivate(ip: string): boolean {
-  let v = ip.toLowerCase().replace(/^\[|\]$/g, "");
-  if (v.startsWith("::ffff:")) v = v.slice(7);
-  if (v === "::1" || v === "0:0:0:0:0:0:0:1") return true;
-  if (v.startsWith("fe80:") || v.startsWith("fc") || v.startsWith("fd")) return true;
-  if (!isIP(v)) return false;
-  if (v.includes(":")) return false;
-  const parts = v.split(".").map((n) => Number(n));
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
-  const [a, b] = parts;
+/** Zones that answer with an address embedded in the name, usually loopback. */
+const SSRF_HELPER_ZONES = ["nip.io", "localtest.me", "sslip.io", "lvh.me"];
+
+function ipv4IsPrivate(octets: number[]): boolean {
+  const [a, b] = octets;
   if (a === 0 || a === 10 || a === 127) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a >= 224) return true;
   return false;
+}
+
+function parseIPv4(raw: string): number[] | null {
+  const parts = raw.split(".");
+  if (parts.length !== 4) return null;
+  const octets: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n > 255) return null;
+    octets.push(n);
+  }
+  return octets;
+}
+
+/** Eight 16-bit groups, or null when the text is not an IPv6 address. */
+function expandIPv6(addr: string): number[] | null {
+  let s = addr.toLowerCase();
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon >= 0) {
+    const tail = s.slice(lastColon + 1);
+    if (tail.includes(".")) {
+      const v4 = parseIPv4(tail);
+      if (!v4) return null;
+      const hi = ((v4[0] << 8) | v4[1]).toString(16);
+      const lo = ((v4[2] << 8) | v4[3]).toString(16);
+      s = `${s.slice(0, lastColon + 1)}${hi}:${lo}`;
+    }
+  }
+  const halves = s.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tailGroups = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  if (halves.length === 1 && head.length !== 8) return null;
+  const missing = 8 - head.length - tailGroups.length;
+  if (missing < 0) return null;
+  const groups = [...head, ...Array.from({ length: Math.max(0, missing) }, () => "0"), ...tailGroups];
+  if (groups.length !== 8) return null;
+  const nums: number[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    nums.push(Number.parseInt(group, 16));
+  }
+  return nums;
+}
+
+function octetsFromGroups(hi: number, lo: number): number[] {
+  return [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255];
+}
+
+export function ipIsPrivate(ip: string): boolean {
+  const raw = ip.trim().toLowerCase().replace(/^\[|\]$/g, "").split("%")[0];
+  if (!raw) return true;
+  if (raw.includes(":")) {
+    const groups = expandIPv6(raw);
+    if (!groups) return true;
+    if (groups.every((group) => group === 0)) return true;
+    if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
+    if ((groups[0] & 0xffc0) === 0xfe80) return true;
+    if ((groups[0] & 0xfe00) === 0xfc00) return true;
+    if ((groups[0] & 0xff00) === 0xff00) return true;
+    const mapped =
+      groups[0] === 0 &&
+      groups[1] === 0 &&
+      groups[2] === 0 &&
+      groups[3] === 0 &&
+      groups[4] === 0 &&
+      groups[5] === 0xffff;
+    if (mapped) return ipv4IsPrivate(octetsFromGroups(groups[6], groups[7]));
+    const compatible = groups.slice(0, 6).every((group) => group === 0);
+    if (compatible) return ipv4IsPrivate(octetsFromGroups(groups[6], groups[7]));
+    return false;
+  }
+  const v4 = parseIPv4(raw);
+  if (!v4) return false;
+  return ipv4IsPrivate(v4);
+}
+
+function isSsrfHelperHost(host: string): boolean {
+  return SSRF_HELPER_ZONES.some((zone) => host === zone || host.endsWith(`.${zone}`));
+}
+
+function looksLikeIp(host: string): boolean {
+  return host.includes(":") || Boolean(parseIPv4(host)) || isIP(host) !== 0;
 }
 
 export function isBlockedHostname(hostname: string): boolean {
@@ -65,8 +145,58 @@ export function isBlockedHostname(hostname: string): boolean {
   if (host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localdomain")) {
     return true;
   }
-  if (isIP(host) && ipIsPrivate(host)) return true;
+  if (isSsrfHelperHost(host)) return true;
+  if (looksLikeIp(host)) return ipIsPrivate(host);
   return false;
+}
+
+export type DnsLookup = (hostname: string) => Promise<string[]>;
+
+const dnsCache = new Map<string, { at: number; addrs: string[] | null }>();
+
+export function clearDnsCache(): void {
+  dnsCache.clear();
+}
+
+export async function defaultDnsLookup(hostname: string): Promise<string[]> {
+  const key = hostname.toLowerCase().replace(/\.$/, "");
+  const hit = dnsCache.get(key);
+  if (hit && Date.now() - hit.at < 15_000) {
+    if (!hit.addrs) throw new Error("dns lookup failed");
+    return hit.addrs;
+  }
+  try {
+    const dns = await import("node:dns/promises");
+    const records = await dns.lookup(key, { all: true, verbatim: true });
+    const addrs = records.map((record) => record.address);
+    dnsCache.set(key, { at: Date.now(), addrs });
+    return addrs;
+  } catch (err) {
+    dnsCache.set(key, { at: Date.now(), addrs: null });
+    throw err;
+  }
+}
+
+/** Sync shape check, then A/AAAA. Any private answer, or a failed lookup, rejects the URL. */
+export async function isPublicHttpUrlResolved(
+  raw: string,
+  lookup: DnsLookup = defaultDnsLookup,
+): Promise<boolean> {
+  if (!isPublicHttpUrl(raw)) return false;
+  let host = "";
+  try {
+    host = new URL(raw).hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  } catch {
+    return false;
+  }
+  if (looksLikeIp(host)) return !ipIsPrivate(host);
+  try {
+    const addrs = await lookup(host);
+    if (!addrs.length) return false;
+    return addrs.every((addr) => !ipIsPrivate(addr));
+  } catch {
+    return false;
+  }
 }
 
 /** Reject non-http(s) and obvious private/link-local targets before any fetch. */
@@ -152,22 +282,36 @@ async function readRobots(
   origin: string,
   fetchImpl: typeof fetch,
   timeoutMs: number,
+  lookup: DnsLookup,
 ): Promise<string> {
   const cached = robotsCache.get(origin);
   if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.txt;
+  let current = `${origin}/robots.txt`;
   try {
-    const res = await fetchImpl(`${origin}/robots.txt`, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { "User-Agent": SPECTRA_UA, Accept: "text/plain,*/*" },
-    });
-    if (!res.ok) {
-      robotsCache.set(origin, { at: Date.now(), txt: "" });
-      return "";
+    for (let hop = 0; hop <= LIMITS.maxRedirects; hop++) {
+      if (!(await isPublicHttpUrlResolved(current, lookup))) return "";
+      const res = await fetchImpl(current, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { "User-Agent": SPECTRA_UA, Accept: "text/plain,*/*" },
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        await res.body?.cancel().catch(() => undefined);
+        if (!loc) return "";
+        current = new URL(loc, current).href;
+        continue;
+      }
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        robotsCache.set(origin, { at: Date.now(), txt: "" });
+        return "";
+      }
+      const txt = (await res.text()).slice(0, 200_000);
+      robotsCache.set(origin, { at: Date.now(), txt });
+      return txt;
     }
-    const txt = (await res.text()).slice(0, 200_000);
-    robotsCache.set(origin, { at: Date.now(), txt });
-    return txt;
+    return "";
   } catch {
     return "";
   }
@@ -181,11 +325,12 @@ export function clearRobotsCache(): void {
 export async function allowedByRobots(
   url: string,
   fetchImpl: typeof fetch = fetch,
+  lookup: DnsLookup = defaultDnsLookup,
 ): Promise<boolean> {
-  if (!isPublicHttpUrl(url)) return false;
+  if (!(await isPublicHttpUrlResolved(url, lookup))) return false;
   try {
     const u = new URL(url);
-    const robots = await readRobots(u.origin, fetchImpl, LIMITS.robotsTimeoutMs);
+    const robots = await readRobots(u.origin, fetchImpl, LIMITS.robotsTimeoutMs, lookup);
     if (!robots) return true;
     return !robotsDisallows(robots, `${u.pathname}${u.search}` || "/", "spectra");
   } catch {
@@ -202,11 +347,12 @@ async function oneGet(
   headers: Record<string, string>,
   fetchImpl: typeof fetch,
   timeoutMs: number,
+  lookup: DnsLookup,
 ): Promise<{ res: Response; body: string; contentType: string; finalUrl: string }> {
   let current = url;
   let res!: Response;
   for (let hop = 0; hop <= LIMITS.maxRedirects; hop++) {
-    if (!isPublicHttpUrl(current)) {
+    if (!(await isPublicHttpUrlResolved(current, lookup))) {
       throw new Error("URL odrzucony (adres prywatny, lokalny albo nie-HTTP)");
     }
     res = await fetchImpl(current, {
@@ -216,6 +362,7 @@ async function oneGet(
     });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
+      await res.body?.cancel().catch(() => undefined);
       if (!loc) break;
       current = new URL(loc, current).href;
       continue;
@@ -241,9 +388,11 @@ export async function resilientGet(
     timeoutMs?: number;
     respectRobots?: boolean;
     headers?: Record<string, string>;
+    lookup?: DnsLookup;
   },
 ): Promise<HttpResult> {
   const fetchImpl = opts?.fetchImpl ?? fetch;
+  const lookup = opts?.lookup ?? defaultDnsLookup;
   const timeoutMs = opts?.timeoutMs ?? LIMITS.fetchTimeoutMs;
   const t0 = Date.now();
   const fail = (partial: Partial<HttpResult> & { error: string }): HttpResult => ({
@@ -259,14 +408,14 @@ export async function resilientGet(
     error: partial.error,
   });
 
-  if (!isPublicHttpUrl(url)) {
+  if (!(await isPublicHttpUrlResolved(url, lookup))) {
     return fail({ error: "URL odrzucony (adres prywatny, lokalny albo nie-HTTP)" });
   }
 
   if (opts?.respectRobots !== false) {
     try {
       const u = new URL(url);
-      const robots = await readRobots(u.origin, fetchImpl, LIMITS.robotsTimeoutMs);
+      const robots = await readRobots(u.origin, fetchImpl, LIMITS.robotsTimeoutMs, lookup);
       const path = `${u.pathname}${u.search}` || "/";
       if (robots && robotsDisallows(robots, path, "spectra")) {
         return fail({
@@ -292,6 +441,7 @@ export async function resilientGet(
         { ...profiles[i], ...opts?.headers },
         fetchImpl,
         timeoutMs,
+        lookup,
       );
       const blocked = looksBlocked(res.status, body);
       const text = isTextContent(contentType);

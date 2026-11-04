@@ -19,7 +19,13 @@ import {
   normalizeMarkdown,
   visibleTextLength,
 } from "./extract.ts";
-import { allowedByRobots, isPublicHttpUrl, resilientGet, type HttpResult } from "./http.ts";
+import {
+  allowedByRobots,
+  isPublicHttpUrl,
+  isPublicHttpUrlResolved,
+  resilientGet,
+  type HttpResult,
+} from "./http.ts";
 import { clampPages, LIMITS } from "./limits.ts";
 import { resolveMode } from "./mode.ts";
 import { canonicalUrl, selectDiverse } from "./rank.ts";
@@ -89,7 +95,7 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
     runs.push(mkRun("curl-impersonate", "error", 0, "Budżet czasu funkcji wyczerpany — strona pominięta"));
     return { ...blankSource(url, runs, "Pominięto", "Budżet czasu"), fetchedAt: started };
   }
-  if (!isPublicHttpUrl(url)) {
+  if (!(await isPublicHttpUrlResolved(url))) {
     runs.push(mkRun("curl-impersonate", "error", 0, "URL odrzucony (adres prywatny, lokalny albo nie-HTTP)"));
     return { ...blankSource(url, runs, "Odrzucony URL", "Adres nie jest publicznym HTTP(S)"), fetchedAt: started };
   }

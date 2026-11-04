@@ -101,6 +101,7 @@ export async function synthesizeWithGrok(input: {
   try {
     const res = await fetch("https://api.x.ai/v1/chat/completions", {
       method: "POST",
+      signal: AbortSignal.timeout(12_000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -146,6 +147,7 @@ export async function synthesizeWithGrok(input: {
       citations: parsed.citations,
     };
   } catch (e) {
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
     return {
       enabled: true,
       used: false,
@@ -154,7 +156,11 @@ export async function synthesizeWithGrok(input: {
       keyPoints: [],
       confidence: 0,
       citations: [],
-      error: e instanceof Error ? e.message : "Błąd wywołania xAI",
+      error: timedOut
+        ? "Synteza Grok przerwana po 12 s, żeby zmieścić się w limicie funkcji"
+        : e instanceof Error
+          ? e.message
+          : "Błąd syntezy",
     };
   }
 }
