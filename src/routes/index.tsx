@@ -103,7 +103,7 @@ function HomePage() {
             query: trimmed,
             mode: m,
             engines,
-            maxPages: m === "deep" ? 3 : 2,
+            maxPages: m === "deep" ? 10 : m === "url" ? 1 : 6,
             useAi,
           },
         });
@@ -147,7 +147,7 @@ function HomePage() {
             <div className="mb-5 inline-flex flex-wrap items-center justify-center gap-2">
               <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface/80 px-3 py-1 text-xs text-fg-muted">
                 <Radar className="h-3.5 w-3.5 text-signal" />
-                10 silników · kompletny pipeline
+                Wiele źródeł · uczciwe statusy
               </span>
               <span
                 className={cn(
@@ -171,8 +171,7 @@ function HomePage() {
               <span className="text-fg-muted">kompleksowego przeszukiwania</span>
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-fg-muted sm:text-base">
-              Wpisz pytanie albo wklej URL. SPECTRA zbiera źródła 10 silnikami crawlingu, a
-              opcjonalnie Grok (xAI) spina je w jedną odpowiedź.
+              Wpisz pytanie albo wklej URL. SPECTRA zbiera wyniki z wielu darmowych źródeł, scrapuje je równolegle, a opcjonalnie Grok spina je w jedną odpowiedź.
             </p>
           </>
         )}
@@ -418,16 +417,16 @@ function HowToSearchCard({ aiAvailable }: { aiAvailable: boolean | null }) {
       </div>
       <ol className="space-y-2.5 text-sm text-fg-muted">
         <li>
-          <span className="font-medium text-fg">1. Zapytanie</span> — discovery (Wikipedia +
-          DuckDuckGo) i głęboki scrape top stron.
+          <span className="font-medium text-fg">1. Zapytanie</span> — Wikipedia (PL/EN/DE),
+          Wikidata, DuckDuckGo, GitHub, HN, Stack Overflow i arXiv. Potem równoległy scrape.
         </li>
         <li>
           <span className="font-medium text-fg">2. URL</span> — wklej adres; pełny pipeline na
           jednej stronie (najskuteczniejsze).
         </li>
         <li>
-          <span className="font-medium text-fg">3. Deep</span> — multi-page: idzie też w linki
-          wewnętrzne.
+          <span className="font-medium text-fg">3. Deep</span> — więcej stron i zejście w linki
+          wewnętrzne, z limitem czasu funkcji.
         </li>
         <li>
           <span className="font-medium text-fg">4. Grok</span> —{" "}

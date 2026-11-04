@@ -1,0 +1,53 @@
+import type { EngineId } from "../engines.ts";
+import type { EngineRun, EngineStatus } from "./types.ts";
+
+const RANK: Record<EngineStatus, number> = {
+  live: 5,
+  degraded: 4,
+  error: 3,
+  skipped: 2,
+  running: 1,
+  pending: 0,
+};
+
+function winningStatus(runs: EngineRun[]): EngineStatus {
+  const hasLive = runs.some((r) => r.status === "live");
+  if (hasLive) return "live";
+  const hasDegraded = runs.some((r) => r.status === "degraded");
+  if (hasDegraded) return "degraded";
+  const hasError = runs.some((r) => r.status === "error");
+  if (hasError) return "error";
+  return "skipped";
+}
+
+export function summarizeRuns(id: EngineId, runs: EngineRun[]): EngineRun {
+  if (!runs.length) {
+    return { id, status: "skipped", durationMs: 0, message: "Brak uruchomienia" };
+  }
+  const status = winningStatus(runs);
+  const relevant = runs.filter((r) => r.status === status);
+  const sample = relevant[0] ?? runs[0];
+  const items = runs.reduce((sum, run) => sum + (run.itemsFound ?? 0), 0);
+  const durationMs = Math.round(runs.reduce((sum, run) => sum + run.durationMs, 0) / runs.length);
+  const extra = runs.length > 1 ? ` · ${runs.length} stron` : "";
+  return {
+    id,
+    status,
+    durationMs,
+    message: `${sample.message}${extra}`,
+    itemsFound: items || undefined,
+  };
+}
+
+/** Never promotes a skipped adapter to live. Live wins only if some run was live. */
+export function aggregateEngineRuns(runs: EngineRun[]): EngineRun[] {
+  const byId = new Map<EngineId, EngineRun[]>();
+  for (const run of runs) {
+    const list = byId.get(run.id) ?? [];
+    list.push(run);
+    byId.set(run.id, list);
+  }
+  return [...byId.entries()]
+    .sort((a, b) => RANK[winningStatus(b[1])] - RANK[winningStatus(a[1])])
+    .map(([id, list]) => summarizeRuns(id, list));
+}

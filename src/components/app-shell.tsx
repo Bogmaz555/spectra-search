@@ -78,11 +78,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <footer className="border-t border-border/60 py-8 text-center text-xs text-fg-subtle">
         <p>
-          SPECTRA łączy 10 open-source silników crawlingu w jeden pipeline wyszukiwania.
+          SPECTRA szuka w wielu źródłach i scrapuje strony równolegle. Status adaptera mówi, co naprawdę zadziałało.
         </p>
         <p className="mt-1 opacity-70">
-          Firecrawl · Crawl4AI · Browser Use · Crawlee · Scrapy · MarkItDown · Scrapling ·
-          scrcpy · AutoScraper · curl-impersonate
+          Darmowe źródła działają bez klucza. Firecrawl, Brave, Serper, Browser Use i Crawl4AI są opcjonalne.
         </p>
       </footer>
     </div>

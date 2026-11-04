@@ -1,8 +1,15 @@
-import type { EngineId } from "@/lib/engines";
+import type { EngineId } from "../engines.ts";
 
 export type SearchMode = "auto" | "search" | "url" | "deep";
 
-export type EngineStatus = "pending" | "running" | "done" | "skipped" | "error";
+/** Honest adapter outcome. `live` means the named integration actually ran. */
+export type EngineStatus =
+  | "pending"
+  | "running"
+  | "live"
+  | "degraded"
+  | "skipped"
+  | "error";
 
 export interface EngineRun {
   id: EngineId;
@@ -27,7 +34,8 @@ export interface ExtractedMedia {
 export interface StructuredField {
   key: string;
   value: string;
-  source: EngineId;
+  /** `spectra` for the local parser, or an EngineId when that API produced the field. */
+  source: string;
 }
 
 export interface PatternGroup {
@@ -76,7 +84,18 @@ export interface SearchHit {
   title: string;
   url: string;
   snippet: string;
-  source: "duckduckgo" | "wikipedia" | "direct";
+  /** Provider id, or several ids joined when fusion merged the same URL. */
+  source: string;
+  score?: number;
+}
+
+export interface DiscoveryRun {
+  id: string;
+  label: string;
+  status: "live" | "skipped" | "error";
+  hits: number;
+  durationMs: number;
+  message: string;
 }
 
 export interface SpectraAi {
@@ -103,6 +122,7 @@ export interface SpectraResult {
   hits: SearchHit[];
   sources: SourceResult[];
   engines: EngineRun[];
+  discovery: DiscoveryRun[];
   summary: string;
   totalDurationMs: number;
   startedAt: string;
