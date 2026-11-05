@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { DEFAULT_ENGINE_IDS, type EngineId } from "@/lib/engines";
-import { spectraAiStatus, spectraSearch } from "@/lib/search";
+import { spectraAiStatus, spectraSearch, spectraSerpapiStatus } from "@/lib/search";
 import { readCapexDeepLink } from "@/lib/scrape/capex-link";
 import type { SearchMode, SpectraResult } from "@/lib/scrape/types";
 import { cn, formatDuration } from "@/lib/utils";
@@ -84,6 +84,10 @@ function HomePage() {
     model: string;
     note: string;
   } | null>(null);
+  const [serpapiStatus, setSerpapiStatus] = useState<{
+    available: boolean;
+    note: string;
+  } | null>(null);
   const aiAvailable = aiStatus === null ? null : aiStatus.available;
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SpectraResult | null>(null);
@@ -99,6 +103,9 @@ function HomePage() {
     void spectraAiStatus()
       .then((s) => setAiStatus(s))
       .catch(() => setAiStatus({ available: false, model: "", note: "" }));
+    void spectraSerpapiStatus()
+      .then((s) => setSerpapiStatus(s))
+      .catch(() => setSerpapiStatus({ available: false, note: "" }));
   }, []);
 
   const toggleEngine = useCallback((id: EngineId) => {
@@ -196,6 +203,14 @@ function HomePage() {
                   : aiStatus.available
                     ? aiStatus.note
                     : "Grok: dodaj XAI_API_KEY"}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/80 px-3 py-1 text-xs text-fg-muted">
+                <Search className="h-3 w-3" />
+                {serpapiStatus === null
+                  ? "Sprawdzam SerpAPI…"
+                  : serpapiStatus.available
+                    ? serpapiStatus.note
+                    : "SerpAPI: dodaj SERPAPI_API_KEY"}
               </span>
             </div>
             <h1 className="font-display text-[clamp(1.85rem,5vw,3rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-fg">

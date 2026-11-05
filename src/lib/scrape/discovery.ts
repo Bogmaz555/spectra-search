@@ -3,6 +3,12 @@ import { LIMITS } from "./limits.ts";
 import { canonicalUrl, dedupeHits, fuseHits, type RankableHit } from "./rank.ts";
 import type { DiscoveryRun } from "./types.ts";
 import { CHROME_UA, SPECTRA_UA } from "./http.ts";
+import {
+  SERPAPI_ENV_KEY,
+  SerpapiBudget,
+  hasSerpapiKey,
+  serpapiSearch,
+} from "./serpapi.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -11,6 +17,8 @@ export interface DiscoveryContext {
   env?: Env;
   timeoutMs?: number;
   perSource?: number;
+  /** Shared per-scan SerpAPI call budget (optional). */
+  serpapiBudget?: SerpapiBudget;
 }
 
 interface Provider {
@@ -20,6 +28,7 @@ interface Provider {
   search: (query: string, ctx: Required<Pick<DiscoveryContext, "fetchImpl" | "env">> & {
     signal: AbortSignal;
     limit: number;
+    serpapiBudget?: SerpapiBudget;
   }) => Promise<RankableHit[]>;
 }
 
@@ -107,6 +116,26 @@ async function getText(
 }
 
 const providers: Provider[] = [
+  {
+    id: "serpapi",
+    label: "SerpAPI Google",
+    envKey: SERPAPI_ENV_KEY,
+    async search(query, ctx) {
+      const key = ctx.env[SERPAPI_ENV_KEY]?.trim();
+      if (!key) return [];
+      return serpapiSearch({
+        engine: "google",
+        query,
+        apiKey: key,
+        fetchImpl: ctx.fetchImpl,
+        signal: ctx.signal,
+        limit: ctx.limit,
+        gl: "pl",
+        hl: "pl",
+        budget: ctx.serpapiBudget,
+      });
+    },
+  },
   {
     id: "duckduckgo",
     label: "DuckDuckGo HTML",
@@ -390,7 +419,7 @@ export async function runDiscovery(
       }
       const signal = AbortSignal.timeout(timeoutMs);
       try {
-        const hits = await provider.search(query, { fetchImpl, env, signal, limit });
+        const hits = await provider.search(query, { fetchImpl, env, signal, limit, serpapiBudget: opts.serpapiBudget });
         groups.push({ source: provider.id, hits });
         runs.push({
           id: provider.id,
@@ -419,3 +448,7 @@ export async function runDiscovery(
 }
 
 export const DISCOVERY_PROVIDER_IDS = providers.map((p) => p.id);
+
+export function discoveryHasSerpapi(env: Env = process.env): boolean {
+  return hasSerpapiKey(env);
+}

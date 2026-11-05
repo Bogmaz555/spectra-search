@@ -13,6 +13,13 @@ import {
 import { summarizeRuns } from "./aggregate.ts";
 import { runDiscovery } from "./discovery.ts";
 import {
+  SerpapiBudget,
+  fetchSerpapiQuota,
+  getSerpapiStatus,
+  hasSerpapiKey,
+  SERPAPI_ENV_KEY,
+} from "./serpapi.ts";
+import {
   applyRegistryToCard,
   capexCrawlPlan,
   COMPANY_SITE_PATHS,
@@ -604,6 +611,13 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     },
   };
 
+  const serpapiBudget = new SerpapiBudget(LIMITS.serpapiCap);
+  const serpapiKey = env[SERPAPI_ENV_KEY]?.trim() ?? "";
+  const serpapiQuotaTask =
+    serpapiKey && hasSerpapiKey(env)
+      ? fetchSerpapiQuota(serpapiKey, { fetchImpl: ctx.fetchImpl })
+      : Promise.resolve(null);
+
   let hits: SearchHit[] = [];
   let discovery: DiscoveryRun[] = [];
   let capexInput: CapexInput | null = null;
@@ -649,12 +663,14 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
       const publishers = news.investment.filter((hit) => !isGoogleNewsHost(hit.url)).length;
       discovery.push({
         id: "google-news",
-        label: "Google News RSS (szablony CapEx)",
+        label: news.serpapiCalls
+          ? "SerpAPI Google News + RSS (CapEx)"
+          : "Google News RSS (szablony CapEx)",
         status: news.investment.length ? "live" : "error",
         hits: news.investment.length,
         durationMs: Date.now() - started,
         message: news.investment.length
-          ? `${news.investment.length} newsów z ${news.investmentQueries} zapytań, ${publishers} linków wydawcy`
+          ? `${news.investment.length} newsów z ${news.investmentQueries} zapytań, ${publishers} linków wydawcy${news.serpapiCalls ? ` · SerpAPI ${news.serpapiCalls}` : ""}`
           : "Brak newsów / błąd RSS",
       });
       discovery.push({
@@ -683,8 +699,8 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     if (input.company) {
       const t1 = Date.now();
       const [news, general, probed] = await Promise.all([
-        searchCapexNews(input.company, { fetchImpl: ctx.fetchImpl }),
-        runDiscovery(`${input.company} inwestycja`, { env, fetchImpl: ctx.fetchImpl }),
+        searchCapexNews(input.company, { fetchImpl: ctx.fetchImpl, env, serpapiBudget }),
+        runDiscovery(`${input.company} inwestycja`, { env, fetchImpl: ctx.fetchImpl, serpapiBudget }),
         timedProbe(userOrigin),
       ]);
       recordNews(news, t1);
@@ -697,7 +713,7 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
       const legalName = capexRegistry.name?.trim();
       if (legalName) {
         const t1 = Date.now();
-        const news = await searchCapexNews(legalName, { fetchImpl: ctx.fetchImpl });
+        const news = await searchCapexNews(legalName, { fetchImpl: ctx.fetchImpl, env, serpapiBudget });
         recordNews(news, t1);
         found = [...news.investment, ...news.press];
       }
@@ -759,11 +775,28 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     hits = [{ title: url, url, snippet: "Bezpośredni crawl URL", source: "direct" }];
     enqueue([url]);
   } else {
-    const found = await runDiscovery(query, { env });
+    const found = await runDiscovery(query, { env, serpapiBudget });
     hits = found.hits;
     discovery = found.runs;
     const seed = resolved === "deep" ? Math.min(LIMITS.deepSeedPages, targetPages) : targetPages;
     enqueue(selectDiverse(hits, seed, 2).map((hit) => hit.url));
+  }
+
+  if (hasSerpapiKey(env) || serpapiBudget.used > 0) {
+    const left = await serpapiQuotaTask;
+    if (typeof left === "number") serpapiBudget.remainingQuota = left;
+    discovery.push({
+      id: "serpapi-budget",
+      label: "SerpAPI budżet",
+      status: serpapiBudget.used > 0 ? "live" : "skipped",
+      hits: serpapiBudget.used,
+      durationMs: 0,
+      message:
+        serpapiBudget.used > 0
+          ? `Zużyto ${serpapiBudget.used}/${serpapiBudget.maxCalls} wyszukiwań` +
+            (typeof left === "number" ? ` · pozostało w planie ~${left}` : "")
+          : getSerpapiStatus(env).note,
+    });
   }
 
   const sources: SourceResult[] = [];
