@@ -12,7 +12,13 @@ import {
 } from "./adapters.ts";
 import { summarizeRuns } from "./aggregate.ts";
 import { runDiscovery } from "./discovery.ts";
-import { capexQueries, googleNews, parseCapexInput } from "./capex.ts";
+import {
+  capexQueries,
+  googleNews,
+  isGoogleNewsHost,
+  parseCapexInput,
+  resolveCapexNewsHits,
+} from "./capex.ts";
 import { fuseHits } from "./rank.ts";
 import {
   extractDocument,
@@ -518,31 +524,42 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     let found: SearchHit[] = [];
     if (input.company) {
       const t1 = Date.now();
-      const groups = await Promise.all(
-        capexQueries(input.company).map(async (q) => {
-          try {
-            return { source: "google-news", hits: await googleNews(q, { limit: 5 }) };
-          } catch {
-            return { source: "google-news", hits: [] };
-          }
-        }),
-      );
-      const newsHits = fuseHits(groups, input.company).slice(0, 20);
+      const newsPromise = (async () => {
+        const groups = await Promise.all(
+          capexQueries(input.company).map(async (q) => {
+            try {
+              return { source: "google-news", hits: await googleNews(q, { limit: 5 }) };
+            } catch {
+              return { source: "google-news", hits: [] };
+            }
+          }),
+        );
+        const fused = fuseHits(groups, input.company).slice(0, 12);
+        const newsHits = await resolveCapexNewsHits(fused, { limit: fused.length });
+        return { groups, newsHits };
+      })();
+      const [news, general] = await Promise.all([
+        newsPromise,
+        runDiscovery(`${input.company} inwestycja`, { env }),
+      ]);
+      const publisherLinks = news.newsHits.filter((hit) => !isGoogleNewsHost(hit.url)).length;
       discovery.push({
         id: "google-news",
         label: "Google News RSS (szablony CapEx)",
-        status: newsHits.length ? "live" : "error",
-        hits: newsHits.length,
+        status: news.newsHits.length ? "live" : "error",
+        hits: news.newsHits.length,
         durationMs: Date.now() - t1,
-        message: newsHits.length ? `${newsHits.length} newsów z ${groups.length} zapytań` : "Brak newsów / błąd RSS",
+        message: news.newsHits.length
+          ? `${news.newsHits.length} newsów z ${news.groups.length} zapytań, ${publisherLinks} linków wydawcy`
+          : "Brak newsów / błąd RSS",
       });
-      const general = await runDiscovery(`${input.company} inwestycja`, { env });
       discovery.push(...general.runs);
-      found = [...newsHits, ...general.hits];
+      found = [...news.newsHits, ...general.hits];
     }
     hits = [...direct, ...found];
     enqueue(direct.map((h) => h.url));
-    enqueue(selectDiverse(found, Math.max(0, targetPages - direct.length), 2).map((hit) => hit.url));
+    const crawlable = found.filter((hit) => !isGoogleNewsHost(hit.url));
+    enqueue(selectDiverse(crawlable, Math.max(0, targetPages - direct.length), 2).map((hit) => hit.url));
   } else if (queryIsUrl && (resolved === "url" || resolved === "deep")) {
     const url = normalizeUrl(query);
     hits = [{ title: url, url, snippet: "Bezpośredni crawl URL", source: "direct" }];
@@ -582,7 +599,8 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
         enqueue(follow);
       }
     }
-    if (resolved !== "deep") break;
+    // CapEx drains the queued publisher/user URLs. It does not follow internal links.
+    if (resolved !== "deep" && resolved !== "capex") break;
   }
 
   if (resolved === "deep") {

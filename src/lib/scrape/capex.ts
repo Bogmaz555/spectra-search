@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
-import { canonicalUrl, type RankableHit } from "./rank.ts";
-import { SPECTRA_UA } from "./http.ts";
+import { canonicalUrl, dedupeHits, type RankableHit } from "./rank.ts";
+import { CHROME_UA, SPECTRA_UA } from "./http.ts";
 
 /** Free, keyless PL query templates for CapEx / investment discovery. */
 export const CAPEX_TEMPLATES = [
@@ -37,7 +37,11 @@ export function capexQueries(company: string): string[] {
   return CAPEX_TEMPLATES.map((t) => t.replace("{c}", company));
 }
 
-/** Google News RSS (free, no key). Links are news.google.com redirects; we keep them as-is. */
+/**
+ * Google News RSS (free, no key). Item links are `news.google.com/rss/articles/…`
+ * shells: robots.txt disallows them and the HTML is not the article. Call
+ * `resolveCapexNewsHits` before crawling so the queue gets publisher URLs.
+ */
 export function parseGoogleNewsRss(xml: string, limit: number): RankableHit[] {
   const $ = cheerio.load(xml, { xml: true });
   const hits: RankableHit[] = [];
@@ -71,6 +75,161 @@ export async function googleNews(
   });
   if (!res.ok) throw new Error(`Google News HTTP ${res.status}`);
   return parseGoogleNewsRss(await res.text(), opts.limit ?? 6);
+}
+
+/** True for news.google.com hosts. Those URLs are not article bodies. */
+export function isGoogleNewsHost(raw: string): boolean {
+  try {
+    const host = new URL(raw).hostname.toLowerCase().replace(/^www\./, "");
+    return host === "news.google.com";
+  } catch {
+    return false;
+  }
+}
+
+export function isGoogleNewsArticleUrl(raw: string): boolean {
+  if (!isGoogleNewsHost(raw)) return false;
+  try {
+    return new URL(raw).pathname.includes("/articles/");
+  } catch {
+    return false;
+  }
+}
+
+interface NewsSignature {
+  id: string;
+  timestamp: string;
+  signature: string;
+}
+
+/** Pull the signed article id Google embeds in the RSS article shell. */
+export function parseGoogleNewsSignature(html: string): NewsSignature | null {
+  const id = html.match(/data-n-a-id="([^"]+)"/)?.[1];
+  const timestamp = html.match(/data-n-a-ts="([^"]+)"/)?.[1];
+  const signature = html.match(/data-n-a-sg="([^"]+)"/)?.[1];
+  if (!id || !timestamp || !signature) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(id) || !/^[A-Za-z0-9_-]+$/.test(signature)) return null;
+  if (!/^\d+$/.test(timestamp)) return null;
+  return { id, timestamp, signature };
+}
+
+/** Publisher URL from a DotsSplashUi `garturlres` payload. */
+export function parseBatchexecutePublisherUrl(body: string): string | null {
+  const cleaned = body.replace(/^\)\]\}'\s*/, "");
+  let data: unknown;
+  try {
+    data = JSON.parse(cleaned);
+  } catch {
+    return null;
+  }
+  const walk = (node: unknown): string | null => {
+    if (typeof node === "string") {
+      if (!node.includes("garturlres")) return null;
+      try {
+        const inner = JSON.parse(node) as unknown;
+        if (Array.isArray(inner) && inner[0] === "garturlres" && typeof inner[1] === "string") {
+          return inner[1];
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    }
+    if (!Array.isArray(node)) return null;
+    for (const item of node) {
+      const found = walk(item);
+      if (found) return found;
+    }
+    return null;
+  };
+  const url = walk(data);
+  if (!url || isGoogleNewsHost(url)) return null;
+  return canonicalUrl(url);
+}
+
+/**
+ * Turn one Google News article shell into the publisher URL.
+ * No key. Falls back to null — callers must not crawl the shell.
+ */
+export async function resolveGoogleNewsArticle(
+  articleUrl: string,
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+): Promise<string | null> {
+  if (!isGoogleNewsArticleUrl(articleUrl)) return null;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? 8_000);
+  const page = await fetchImpl(articleUrl, {
+    headers: { "User-Agent": CHROME_UA, Accept: "text/html", "Accept-Language": "pl" },
+    signal,
+  });
+  if (!page.ok) return null;
+  const sig = parseGoogleNewsSignature(await page.text());
+  if (!sig) return null;
+  const inner = JSON.stringify([
+    "garturlreq",
+    [
+      ["X", "X", ["X", "X"], null, null, 1, 1, "PL:pl", null, 1, null, null, null, null, null, 0, 1],
+      "X",
+      "X",
+      1,
+      [1, 1, 1],
+      1,
+      1,
+      null,
+      0,
+      0,
+      null,
+      0,
+    ],
+    sig.id,
+    Number(sig.timestamp),
+    sig.signature,
+  ]);
+  const freq = JSON.stringify([[["Fbv4je", inner, null, "generic"]]]);
+  const res = await fetchImpl("https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je", {
+    method: "POST",
+    headers: {
+      "User-Agent": CHROME_UA,
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body: `f.req=${encodeURIComponent(freq)}`,
+    signal,
+  });
+  if (!res.ok) return null;
+  return parseBatchexecutePublisherUrl(await res.text());
+}
+
+/** Replace up to `limit` Google News shells with publisher URLs. Failures stay as shells. */
+export async function resolveCapexNewsHits(
+  hits: RankableHit[],
+  opts: { fetchImpl?: typeof fetch; limit?: number; timeoutMs?: number; concurrency?: number } = {},
+): Promise<RankableHit[]> {
+  const limit = opts.limit ?? 8;
+  const concurrency = Math.max(1, opts.concurrency ?? 4);
+  const head = hits.slice(0, limit);
+  const tail = hits.slice(limit);
+  const resolved: RankableHit[] = new Array(head.length);
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      const hit = head[index];
+      if (!hit) return;
+      if (!isGoogleNewsArticleUrl(hit.url)) {
+        resolved[index] = hit;
+        continue;
+      }
+      try {
+        const publisher = await resolveGoogleNewsArticle(hit.url, opts);
+        resolved[index] = publisher ? { ...hit, url: publisher } : hit;
+      } catch {
+        resolved[index] = hit;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, head.length) }, () => worker()));
+  return dedupeHits([...resolved, ...tail]);
 }
 
 export interface CapexCard {
