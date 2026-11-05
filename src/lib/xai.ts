@@ -1,7 +1,16 @@
 import type { SearchHit, SourceResult, SpectraAi } from "@/lib/scrape/types";
 
+/** Widely available chat model. Override with a non-empty `XAI_MODEL`. */
+const DEFAULT_XAI_MODEL = "grok-4.3";
+
 export function hasXaiKey(): boolean {
   return Boolean(process.env.XAI_API_KEY?.trim());
+}
+
+/** One resolved slug for status, the request body, and error payloads. */
+export function resolveXaiModel(): string {
+  const override = process.env.XAI_MODEL?.trim();
+  return override || DEFAULT_XAI_MODEL;
 }
 
 export function getXaiStatus(): {
@@ -10,11 +19,12 @@ export function getXaiStatus(): {
   note: string;
 } {
   const available = hasXaiKey();
+  const model = resolveXaiModel();
   return {
     available,
-    model: "grok-4.5",
+    model,
     note: available
-      ? "Grok syntezuje odpowiedź z wyciągniętych źródeł"
+      ? `klucz ustawiony · model ${model}`
       : "Ustaw XAI_API_KEY na Vercel, aby włączyć syntezę Grok",
   };
 }
@@ -53,12 +63,13 @@ export async function synthesizeWithGrok(input: {
   hits: SearchHit[];
   sources: SourceResult[];
 }): Promise<SpectraAi> {
+  const model = resolveXaiModel();
   const apiKey = process.env.XAI_API_KEY?.trim();
   if (!apiKey) {
     return {
       enabled: false,
       used: false,
-      model: "grok-4.5",
+      model,
       answer: "",
       keyPoints: [],
       confidence: 0,
@@ -71,7 +82,7 @@ export async function synthesizeWithGrok(input: {
     return {
       enabled: true,
       used: false,
-      model: "grok-4.5",
+      model,
       answer: "",
       keyPoints: [],
       confidence: 0,
@@ -107,7 +118,7 @@ export async function synthesizeWithGrok(input: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "grok-4.5",
+        model,
         temperature: 0.2,
         max_tokens: 1200,
         messages: [
@@ -122,7 +133,7 @@ export async function synthesizeWithGrok(input: {
       return {
         enabled: true,
         used: false,
-        model: "grok-4.5",
+        model,
         answer: "",
         keyPoints: [],
         confidence: 0,
@@ -140,7 +151,7 @@ export async function synthesizeWithGrok(input: {
     return {
       enabled: true,
       used: true,
-      model: "grok-4.5",
+      model,
       answer: parsed.answer,
       keyPoints: parsed.keyPoints,
       confidence: parsed.confidence,
@@ -151,7 +162,7 @@ export async function synthesizeWithGrok(input: {
     return {
       enabled: true,
       used: false,
-      model: "grok-4.5",
+      model,
       answer: "",
       keyPoints: [],
       confidence: 0,
