@@ -37,7 +37,7 @@ Darmowa ścieżka działa bez płatnych kluczy.
 - Vite 8 + Tailwind v4
 - Cheerio
 - Better Auth
-- Vercel (Nitro, `maxDuration` 60s)
+- Vercel (Nitro, `maxDuration` 180s)
 
 ## Lokalnie
 
@@ -53,7 +53,7 @@ npm test
 
 Wszystkie klucze są opcjonalne. Opis każdego jest w [`.env.example`](.env.example). Nie commituj sekretów — ustaw je w Vercel → Project → Settings → Environment Variables.
 
-Skala jednego zapytania: do 36 złączonych trafień, domyślnie 6 stron w trybie Szukaj i 10 w Deep, współbieżność 3, budżet około 45 s (limit funkcji 60 s).
+Skala jednego zapytania: do 36 złączonych trafień, domyślnie 6 stron w trybie Szukaj i 10 w Deep, współbieżność 3, budżet crawla około 45 s. Synteza Grok ma osobny limit 90 s (limit funkcji 180 s).
 
 ## Tryby
 

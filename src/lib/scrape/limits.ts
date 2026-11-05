@@ -1,4 +1,28 @@
-/** Budgets chosen so a Pro Vercel function (60s) can finish; work stops early on the deadline. */
+/**
+ * Crawl work stops on `searchBudgetMs`. Grok synthesis gets its own ceiling
+ * (`SYNTHESIS_TIMEOUT_MS`) and both must finish inside `FUNCTION_MAX_DURATION_SEC`
+ * with `FUNCTION_SAFETY_MS` left so we abort ourselves before Vercel kills the
+ * invocation. Hobby Fluid allows 300s; 180s is the cap we set on the function.
+ */
+export const FUNCTION_MAX_DURATION_SEC = 180;
+/** grok-4.3 (default reasoning effort low) did not return inside the old 12s abort. */
+export const SYNTHESIS_TIMEOUT_MS = 90_000;
+/** Stay under the platform cap so the Polish abort wins over a platform 504. */
+export const FUNCTION_SAFETY_MS = 12_000;
+/** Below this, starting a reasoning call would only reproduce a short abort. */
+export const MIN_SYNTHESIS_MS = 20_000;
+
+/**
+ * Abort budget for one Grok call after `elapsedMs` of crawl work.
+ * Returns 0 when the remaining function time cannot hold a useful call.
+ */
+export function synthesisAbortMs(elapsedMs: number): number {
+  const elapsed = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
+  const remain = FUNCTION_MAX_DURATION_SEC * 1000 - elapsed - FUNCTION_SAFETY_MS;
+  if (remain < MIN_SYNTHESIS_MS) return 0;
+  return Math.min(SYNTHESIS_TIMEOUT_MS, remain);
+}
+
 export const LIMITS = {
   discoveryPerSource: 6,
   fusedHitsCap: 36,

@@ -1,7 +1,13 @@
+import { SYNTHESIS_TIMEOUT_MS } from "./scrape/limits.ts";
 import type { SearchHit, SourceResult, SpectraAi } from "@/lib/scrape/types";
 
 /** Widely available chat model. Override with a non-empty `XAI_MODEL`. */
 const DEFAULT_XAI_MODEL = "grok-4.3";
+
+export function synthesisTimeoutMessage(timeoutMs: number): string {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  return `Synteza Grok przerwana po ${seconds} s, żeby zmieścić się w limicie funkcji`;
+}
 
 export function hasXaiKey(): boolean {
   return Boolean(process.env.XAI_API_KEY?.trim());
@@ -62,6 +68,8 @@ export async function synthesizeWithGrok(input: {
   mode: string;
   hits: SearchHit[];
   sources: SourceResult[];
+  /** Abort the xAI call after this many ms. 0 skips the call (no time left). */
+  timeoutMs?: number;
 }): Promise<SpectraAi> {
   const model = resolveXaiModel();
   const apiKey = process.env.XAI_API_KEY?.trim();
@@ -91,6 +99,20 @@ export async function synthesizeWithGrok(input: {
     };
   }
 
+  const timeoutMs = input.timeoutMs ?? SYNTHESIS_TIMEOUT_MS;
+  if (timeoutMs <= 0) {
+    return {
+      enabled: true,
+      used: false,
+      model,
+      answer: "",
+      keyPoints: [],
+      confidence: 0,
+      citations: [],
+      error: "Synteza Grok pominięta — po pobraniu stron zostało za mało czasu funkcji",
+    };
+  }
+
   const context = packSources(input.sources, input.hits);
   const system = [
     "Jesteś warstwą inteligencji portalu SPECTRA.",
@@ -112,7 +134,7 @@ export async function synthesizeWithGrok(input: {
   try {
     const res = await fetch("https://api.x.ai/v1/chat/completions", {
       method: "POST",
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -168,7 +190,7 @@ export async function synthesizeWithGrok(input: {
       confidence: 0,
       citations: [],
       error: timedOut
-        ? "Synteza Grok przerwana po 12 s, żeby zmieścić się w limicie funkcji"
+        ? synthesisTimeoutMessage(timeoutMs)
         : e instanceof Error
           ? e.message
           : "Błąd syntezy",

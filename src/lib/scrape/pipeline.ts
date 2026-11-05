@@ -26,7 +26,7 @@ import {
   resilientGet,
   type HttpResult,
 } from "./http.ts";
-import { clampPages, LIMITS } from "./limits.ts";
+import { clampPages, LIMITS, synthesisAbortMs } from "./limits.ts";
 import { resolveMode } from "./mode.ts";
 import { canonicalUrl, selectDiverse } from "./rank.ts";
 import type {
@@ -609,7 +609,13 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     error: xai.available ? (useAi ? undefined : "Synteza Grok wyłączona w tym skanie") : xai.note,
   };
   if (useAi && xai.available) {
-    ai = await synthesizeWithGrok({ query, mode: resolved, hits, sources });
+    ai = await synthesizeWithGrok({
+      query,
+      mode: resolved,
+      hits,
+      sources,
+      timeoutMs: synthesisAbortMs(Date.now() - t0),
+    });
   }
 
   return {
