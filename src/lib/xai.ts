@@ -1,3 +1,4 @@
+import { CAPEX_CHECKLIST, type CapexCard } from "./scrape/capex.ts";
 import { SYNTHESIS_TIMEOUT_MS } from "./scrape/limits.ts";
 import type { SearchHit, SourceResult, SpectraAi } from "@/lib/scrape/types";
 
@@ -70,6 +71,8 @@ export async function synthesizeWithGrok(input: {
   sources: SourceResult[];
   /** Abort the xAI call after this many ms. 0 skips the call (no time left). */
   timeoutMs?: number;
+  /** Company name: switch to the CapEx / investment research prompt. */
+  capex?: string;
 }): Promise<SpectraAi> {
   const model = resolveXaiModel();
   const apiKey = process.env.XAI_API_KEY?.trim();
@@ -114,7 +117,7 @@ export async function synthesizeWithGrok(input: {
   }
 
   const context = packSources(input.sources, input.hits);
-  const system = [
+  const system: string = [
     "Jesteś warstwą inteligencji portalu SPECTRA.",
     "Na podstawie WYŁĄCZNIE podanych źródeł przygotuj zwięzłą odpowiedź po polsku.",
     "Nie wymyślaj faktów spoza źródeł. Jeśli coś jest niepewne — napisz to.",
@@ -123,6 +126,17 @@ export async function synthesizeWithGrok(input: {
     '{ "answer": "string (2-5 akapitów markdown)", "keyPoints": ["..."], "confidence": 0.0-1.0, "citations": [{"title":"...","url":"..."}] }',
   ].join(" ");
 
+  const systemText = input.capex
+    ? [
+        "Jesteś analitykiem rynku przemysłowego PL dla firmy integratora automatyki i pakowania (Autoproces).",
+        `Badana firma: ${input.capex}.`,
+        "Na podstawie WYŁĄCZNIE podanych źródeł wypisz inwestycje CapEx: nowe hale, linie produkcyjne, rozbudowy, automatyzację, robotyzację, magazyny, dotacje.",
+        "Nie wymyślaj faktów; brak danych = pomiń pole. Każda inwestycja musi mieć URL źródła.",
+        "Zwróć WYŁĄCZNIE poprawny JSON (bez markdown fences) o schemacie:",
+        '{ "answer": "markdown: podsumowanie inwestycji i szansy współpracy", "keyPoints": ["..."], "confidence": 0.0-1.0, "citations": [{"title":"...","url":"..."}], "capex": { "company": "...", "investments": [{"what":"...","value":"...","when":"...","location":"...","url":"..."}], "signals": ["sygnał zakupowy / potrzeba automatyzacji"], "checklist": [{"item":"...","done":true}] } }',
+        `Checklista ma zawierać dokładnie te punkty (done=true tylko gdy źródło to potwierdza): ${CAPEX_CHECKLIST.join(" | ")}.`,
+      ].join(" ")
+    : system;
   const user = [
     `Zapytanie użytkownika: ${input.query}`,
     `Tryb: ${input.mode}`,
@@ -142,9 +156,9 @@ export async function synthesizeWithGrok(input: {
       body: JSON.stringify({
         model,
         temperature: 0.2,
-        max_tokens: 1200,
+        max_tokens: input.capex ? 2200 : 1200,
         messages: [
-          { role: "system", content: system },
+          { role: "system", content: systemText },
           { role: "user", content: user },
         ],
       }),
@@ -169,6 +183,7 @@ export async function synthesizeWithGrok(input: {
     };
     const raw = body.choices?.[0]?.message?.content?.trim() ?? "";
     const parsed = parseAiJson(raw, input.hits, input.sources);
+    const capex = input.capex ? parseCapexCard(raw, input.capex, parsed.citations) : undefined;
 
     return {
       enabled: true,
@@ -178,6 +193,7 @@ export async function synthesizeWithGrok(input: {
       keyPoints: parsed.keyPoints,
       confidence: parsed.confidence,
       citations: parsed.citations,
+      ...(capex ? { capex } : {}),
     };
   } catch (e) {
     const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
@@ -329,4 +345,39 @@ export function scoreEffectiveness(input: {
     score >= 85 ? "A" : score >= 70 ? "B" : score >= 55 ? "C" : score >= 40 ? "D" : "F";
 
   return { score, grade, factors };
+}
+
+/** Pull the optional `capex` card out of the model JSON; always return a full checklist. */
+export function parseCapexCard(
+  raw: string,
+  company: string,
+  citations: { title: string; url: string }[],
+): CapexCard {
+  let data: { capex?: Partial<CapexCard> } = {};
+  try {
+    const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    data = JSON.parse(text) as typeof data;
+  } catch {
+    /* fall through to empty card */
+  }
+  const c = data.capex ?? {};
+  const done = new Map(
+    (Array.isArray(c.checklist) ? c.checklist : []).map((i) => [String(i?.item ?? ""), Boolean(i?.done)]),
+  );
+  return {
+    company: String(c.company || company),
+    investments: (Array.isArray(c.investments) ? c.investments : [])
+      .filter((i) => i && i.what)
+      .slice(0, 10)
+      .map((i) => ({
+        what: String(i.what),
+        value: i.value ? String(i.value) : undefined,
+        when: i.when ? String(i.when) : undefined,
+        location: i.location ? String(i.location) : undefined,
+        url: i.url ? String(i.url) : undefined,
+      })),
+    signals: (Array.isArray(c.signals) ? c.signals : []).map(String).filter(Boolean).slice(0, 8),
+    checklist: CAPEX_CHECKLIST.map((item) => ({ item, done: done.get(item) ?? false })),
+    sources: citations,
+  };
 }

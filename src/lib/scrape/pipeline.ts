@@ -12,6 +12,8 @@ import {
 } from "./adapters.ts";
 import { summarizeRuns } from "./aggregate.ts";
 import { runDiscovery } from "./discovery.ts";
+import { capexQueries, googleNews, parseCapexInput } from "./capex.ts";
+import { fuseHits } from "./rank.ts";
 import {
   extractDocument,
   htmlToMarkdown,
@@ -510,7 +512,38 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     }
   };
 
-  if (queryIsUrl && (resolved === "url" || resolved === "deep")) {
+  if (resolved === "capex") {
+    const input = parseCapexInput(query);
+    const direct: SearchHit[] = input.urls.map((url) => ({ title: url, url, snippet: "URL podany przez użytkownika", source: "direct" }));
+    let found: SearchHit[] = [];
+    if (input.company) {
+      const t1 = Date.now();
+      const groups = await Promise.all(
+        capexQueries(input.company).map(async (q) => {
+          try {
+            return { source: "google-news", hits: await googleNews(q, { limit: 5 }) };
+          } catch {
+            return { source: "google-news", hits: [] };
+          }
+        }),
+      );
+      const newsHits = fuseHits(groups, input.company).slice(0, 20);
+      discovery.push({
+        id: "google-news",
+        label: "Google News RSS (szablony CapEx)",
+        status: newsHits.length ? "live" : "error",
+        hits: newsHits.length,
+        durationMs: Date.now() - t1,
+        message: newsHits.length ? `${newsHits.length} newsów z ${groups.length} zapytań` : "Brak newsów / błąd RSS",
+      });
+      const general = await runDiscovery(`${input.company} inwestycja`, { env });
+      discovery.push(...general.runs);
+      found = [...newsHits, ...general.hits];
+    }
+    hits = [...direct, ...found];
+    enqueue(direct.map((h) => h.url));
+    enqueue(selectDiverse(found, Math.max(0, targetPages - direct.length), 2).map((hit) => hit.url));
+  } else if (queryIsUrl && (resolved === "url" || resolved === "deep")) {
     const url = normalizeUrl(query);
     hits = [{ title: url, url, snippet: "Bezpośredni crawl URL", source: "direct" }];
     enqueue([url]);
@@ -615,6 +648,7 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
       hits,
       sources,
       timeoutMs: synthesisAbortMs(Date.now() - t0),
+      capex: resolved === "capex" ? parseCapexInput(query).company || sources[0]?.title || query : undefined,
     });
   }
 

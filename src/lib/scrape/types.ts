@@ -1,6 +1,6 @@
 import type { EngineId } from "../engines.ts";
 
-export type SearchMode = "auto" | "search" | "url" | "deep";
+export type SearchMode = "auto" | "search" | "url" | "deep" | "capex";
 
 /** Honest adapter outcome. `live` means the named integration actually ran. */
 export type EngineStatus =
@@ -107,6 +107,8 @@ export interface SpectraAi {
   confidence: number;
   citations: { title: string; url: string }[];
   error?: string;
+  /** Present in CapEx mode: structured card for an opportunity (szansa). */
+  capex?: import("./capex.ts").CapexCard;
 }
 
 export interface EffectivenessReport {
@@ -118,7 +120,7 @@ export interface EffectivenessReport {
 export interface SpectraResult {
   query: string;
   mode: SearchMode;
-  resolvedMode: "search" | "url" | "deep";
+  resolvedMode: "search" | "url" | "deep" | "capex";
   hits: SearchHit[];
   sources: SourceResult[];
   engines: EngineRun[];

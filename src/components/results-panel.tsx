@@ -73,7 +73,9 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
             </div>
           )}
         </section>
-      ) : result.ai.error ? (
+      ) : null}
+      {result.ai.capex ? <CapexCardView card={result.ai.capex} /> : null}
+      {result.ai.used && result.ai.answer ? null : result.ai.error ? (
         <section className="rounded-[var(--radius-xl)] border border-border bg-surface/50 px-4 py-3 text-sm text-fg-muted">
           <span className="font-medium text-fg">Grok: </span>
           {result.ai.error}
@@ -89,7 +91,9 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
                   ? "Crawl URL"
                   : result.resolvedMode === "deep"
                     ? "Deep crawl"
-                    : "Wyszukiwanie"}
+                    : result.resolvedMode === "capex"
+                      ? "Firma / CapEx"
+                      : "Wyszukiwanie"}
               </Badge>
               <Badge variant="default">{result.hits.length} trafień</Badge>
               <Badge variant="default">{result.sources.length} źródeł</Badge>
@@ -408,6 +412,54 @@ function SourceCard({ source, index }: { source: SourceResult; index: number }) 
           </TabsContent>
         </Tabs>
       </div>
+    </section>
+  );
+}
+
+function CapexCardView({ card }: { card: NonNullable<SpectraResult["ai"]["capex"]> }) {
+  const json = JSON.stringify(card, null, 2);
+  return (
+    <section className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-5 sm:p-6">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-lg font-semibold text-fg">Karta szansy · {card.company}</h2>
+        <button
+          type="button"
+          className="rounded-full border border-border px-3 py-1 text-xs text-fg-muted hover:border-signal/40 hover:text-signal"
+          onClick={() => void navigator.clipboard?.writeText(json)}
+        >
+          Kopiuj JSON do szans
+        </button>
+      </div>
+      {card.investments.length ? (
+        <ul className="space-y-2 text-sm">
+          {card.investments.map((i, idx) => (
+            <li key={idx} className="text-fg">
+              <span className="font-medium">{i.what}</span>
+              {[i.value, i.when, i.location].filter(Boolean).length ? (
+                <span className="text-fg-muted"> — {[i.value, i.when, i.location].filter(Boolean).join(" · ")}</span>
+              ) : null}
+              {i.url ? (
+                <a href={i.url} target="_blank" rel="noopener noreferrer" className="ml-2 text-signal">
+                  źródło
+                </a>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-fg-muted">Brak potwierdzonych inwestycji w zebranych źródłach.</p>
+      )}
+      {card.signals.length ? (
+        <p className="mt-3 text-sm text-fg-muted">Sygnały: {card.signals.join(" · ")}</p>
+      ) : null}
+      <ul className="mt-4 space-y-1 border-t border-border/80 pt-4 text-sm">
+        {card.checklist.map((c) => (
+          <li key={c.item} className="flex gap-2 text-fg-muted">
+            {c.done ? <CheckCircle2 className="h-4 w-4 text-success" /> : <XCircle className="h-4 w-4 text-danger" />}
+            {c.item}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
