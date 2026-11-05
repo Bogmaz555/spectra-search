@@ -28,6 +28,7 @@ export const Route = createFileRoute("/")({ component: HomePage });
 
 const EXAMPLES = [
   { label: "Wikipedia: AI", query: "sztuczna inteligencja", mode: "search" as const },
+  { label: "CapEx: firma", query: "Mlekovita", mode: "capex" as const },
   { label: "Crawl URL", query: "https://example.com", mode: "url" as const },
   { label: "Deep: React", query: "React Server Components", mode: "deep" as const },
   { label: "GitHub trending", query: "https://github.com/trending", mode: "url" as const },
@@ -108,7 +109,7 @@ function HomePage() {
             query: trimmed,
             mode: m,
             engines,
-            maxPages: m === "deep" ? 10 : m === "url" ? 1 : 6,
+            maxPages: m === "deep" || m === "capex" ? 10 : m === "url" ? 1 : 6,
             useAi,
           },
         });
@@ -138,6 +139,7 @@ function HomePage() {
         { id: "search" as const, label: "Szukaj", icon: Search, hint: "Discovery + scrape" },
         { id: "url" as const, label: "URL", icon: Globe2, hint: "Bezpośredni crawl" },
         { id: "deep" as const, label: "Deep", icon: Crosshair, hint: "Multi-page" },
+        { id: "capex" as const, label: "Firma / CapEx", icon: Crosshair, hint: "Nazwa firmy lub lista URL" },
       ] as const,
     [],
   );

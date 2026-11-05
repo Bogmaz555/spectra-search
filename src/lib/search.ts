@@ -21,7 +21,7 @@ const engineIdSchema = z.enum([
 
 const requestSchema = z.object({
   query: z.string().min(1).max(2000),
-  mode: z.enum(["auto", "search", "url", "deep"]).optional(),
+  mode: z.enum(["auto", "search", "url", "deep", "capex"]).optional(),
   engines: z.array(engineIdSchema).optional(),
   maxPages: z.number().min(1).max(12).optional(),
   useAi: z.boolean().optional(),
