@@ -36,9 +36,7 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
               <Sparkles className="h-3 w-3" />
               Grok · {result.ai.model}
             </Badge>
-            <Badge variant="default">
-              pewność {(result.ai.confidence * 100).toFixed(0)}%
-            </Badge>
+            <Badge variant="default">pewność {(result.ai.confidence * 100).toFixed(0)}%</Badge>
           </div>
           <h2 className="font-display text-lg font-semibold tracking-tight text-fg sm:text-xl">
             Odpowiedź z syntezy źródeł
@@ -134,7 +132,11 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
                       <p className="text-sm font-medium text-fg">{run.label}</p>
                       <Badge
                         variant={
-                          run.status === "live" ? "success" : run.status === "error" ? "danger" : "default"
+                          run.status === "live"
+                            ? "success"
+                            : run.status === "error"
+                              ? "danger"
+                              : "default"
                         }
                       >
                         {run.status === "live"
@@ -281,9 +283,7 @@ function SourceCard({ source, index }: { source: SourceResult; index: number }) 
             HTTP {source.statusCode || "—"}
           </Badge>
         </div>
-        {source.description && (
-          <p className="mt-2 text-sm text-fg-muted">{source.description}</p>
-        )}
+        {source.description && <p className="mt-2 text-sm text-fg-muted">{source.description}</p>}
       </div>
 
       <div className="px-4 py-4 sm:px-5">
@@ -394,9 +394,7 @@ function SourceCard({ source, index }: { source: SourceResult; index: number }) 
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-fg">{p.label}</p>
-                      <Badge variant="default">
-                        {(p.confidence * 100).toFixed(0)}% conf.
-                      </Badge>
+                      <Badge variant="default">{(p.confidence * 100).toFixed(0)}% conf.</Badge>
                     </div>
                     <ul className="space-y-1">
                       {p.items.map((item) => (
@@ -421,25 +419,68 @@ function CapexCardView({ card }: { card: NonNullable<SpectraResult["ai"]["capex"
   return (
     <section className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-5 sm:p-6">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-lg font-semibold text-fg">Karta szansy · {card.company}</h2>
-        <button
-          type="button"
-          className="rounded-full border border-border px-3 py-1 text-xs text-fg-muted hover:border-signal/40 hover:text-signal"
-          onClick={() => void navigator.clipboard?.writeText(json)}
-        >
-          Kopiuj JSON do szans
-        </button>
+        <h2 className="font-display text-lg font-semibold text-fg">
+          Karta szansy · {card.company}
+        </h2>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-full border border-border px-3 py-1 text-xs text-fg-muted hover:border-signal/40 hover:text-signal"
+            onClick={() => void navigator.clipboard?.writeText(json)}
+          >
+            Kopiuj JSON do szans
+          </button>
+          <a
+            href={card.investigateUrl}
+            className="rounded-full border border-border px-3 py-1 text-xs text-fg-muted hover:border-signal/40 hover:text-signal"
+          >
+            Zbadaj firmę
+          </a>
+        </div>
       </div>
+      {card.registry?.note ? (
+        <p className="mb-3 text-sm text-fg-muted">{card.registry.note}</p>
+      ) : null}
+      {card.registry?.krs ? (
+        <p className="mb-3 text-xs text-fg-subtle">
+          KRS {card.registry.krs}
+          {card.registry.nip ? ` · NIP ${card.registry.nip}` : ""}
+        </p>
+      ) : null}
+      {card.people.length ? (
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm font-semibold text-fg">Osoby (KRS)</h3>
+          <ul className="space-y-1.5 text-sm">
+            {card.people.map((person) => (
+              <li key={`${person.kind}-${person.name}-${person.role}`} className="text-fg">
+                <span className="font-medium">{person.name}</span>
+                <span className="text-fg-muted"> — {person.role}</span>
+                <span className="ml-2 text-[11px] uppercase tracking-wide text-fg-subtle">
+                  {person.kind === "zarzad" ? "zarząd" : "prokurent"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {card.investments.length ? (
         <ul className="space-y-2 text-sm">
           {card.investments.map((i, idx) => (
             <li key={idx} className="text-fg">
               <span className="font-medium">{i.what}</span>
               {[i.value, i.when, i.location].filter(Boolean).length ? (
-                <span className="text-fg-muted"> — {[i.value, i.when, i.location].filter(Boolean).join(" · ")}</span>
+                <span className="text-fg-muted">
+                  {" "}
+                  — {[i.value, i.when, i.location].filter(Boolean).join(" · ")}
+                </span>
               ) : null}
               {i.url ? (
-                <a href={i.url} target="_blank" rel="noopener noreferrer" className="ml-2 text-signal">
+                <a
+                  href={i.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-2 text-signal"
+                >
                   źródło
                 </a>
               ) : null}
@@ -447,15 +488,40 @@ function CapexCardView({ card }: { card: NonNullable<SpectraResult["ai"]["capex"
           ))}
         </ul>
       ) : (
-        <p className="text-sm text-fg-muted">Brak potwierdzonych inwestycji w zebranych źródłach.</p>
+        <p className="text-sm text-fg-muted">
+          Brak potwierdzonych inwestycji w zebranych źródłach.
+        </p>
       )}
       {card.signals.length ? (
         <p className="mt-3 text-sm text-fg-muted">Sygnały: {card.signals.join(" · ")}</p>
       ) : null}
+      {card.sources.length ? (
+        <div className="mt-4">
+          <h3 className="mb-2 text-sm font-semibold text-fg">Źródła</h3>
+          <ul className="space-y-1">
+            {card.sources.slice(0, 8).map((source) => (
+              <li key={source.url}>
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-signal hover:underline"
+                >
+                  {source.title || source.url}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <ul className="mt-4 space-y-1 border-t border-border/80 pt-4 text-sm">
         {card.checklist.map((c) => (
           <li key={c.item} className="flex gap-2 text-fg-muted">
-            {c.done ? <CheckCircle2 className="h-4 w-4 text-success" /> : <XCircle className="h-4 w-4 text-danger" />}
+            {c.done ? (
+              <CheckCircle2 className="h-4 w-4 text-success" />
+            ) : (
+              <XCircle className="h-4 w-4 text-danger" />
+            )}
             {c.item}
           </li>
         ))}

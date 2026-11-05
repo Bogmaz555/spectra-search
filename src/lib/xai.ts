@@ -1,4 +1,5 @@
 import { CAPEX_CHECKLIST, type CapexCard } from "./scrape/capex.ts";
+import { capexDeepLink } from "./scrape/capex-link.ts";
 import { SYNTHESIS_TIMEOUT_MS } from "./scrape/limits.ts";
 import type { SearchHit, SourceResult, SpectraAi } from "@/lib/scrape/types";
 
@@ -73,6 +74,8 @@ export async function synthesizeWithGrok(input: {
   timeoutMs?: number;
   /** Company name: switch to the CapEx / investment research prompt. */
   capex?: string;
+  /** Official KRS extract (names and roles, no PESEL) already fetched for this scan. */
+  registryContext?: string;
 }): Promise<SpectraAi> {
   const model = resolveXaiModel();
   const apiKey = process.env.XAI_API_KEY?.trim();
@@ -132,6 +135,7 @@ export async function synthesizeWithGrok(input: {
         `Badana firma: ${input.capex}.`,
         "Na podstawie WYŁĄCZNIE podanych źródeł wypisz inwestycje CapEx: nowe hale, linie produkcyjne, rozbudowy, automatyzację, robotyzację, magazyny, dotacje.",
         "Nie wymyślaj faktów; brak danych = pomiń pole. Każda inwestycja musi mieć URL źródła.",
+        "Nie dopisuj członków zarządu ani prokurentów i nie podawaj PESEL — reprezentację dokleja odpis KRS.",
         "Zwróć WYŁĄCZNIE poprawny JSON (bez markdown fences) o schemacie:",
         '{ "answer": "markdown: podsumowanie inwestycji i szansy współpracy", "keyPoints": ["..."], "confidence": 0.0-1.0, "citations": [{"title":"...","url":"..."}], "capex": { "company": "...", "investments": [{"what":"...","value":"...","when":"...","location":"...","url":"..."}], "signals": ["sygnał zakupowy / potrzeba automatyzacji"], "checklist": [{"item":"...","done":true}] } }',
         `Checklista ma zawierać dokładnie te punkty (done=true tylko gdy źródło to potwierdza): ${CAPEX_CHECKLIST.join(" | ")}.`,
@@ -143,6 +147,13 @@ export async function synthesizeWithGrok(input: {
     "",
     "Źródła zebrane przez pipeline crawlerów:",
     context,
+    ...(input.registryContext
+      ? [
+          "",
+          "Reprezentacja z publicznego odpisu KRS (bez PESEL):",
+          input.registryContext.slice(0, 2500),
+        ]
+      : []),
   ].join("\n");
 
   try {
@@ -293,9 +304,7 @@ export function scoreEffectiveness(input: {
     "Discovery",
     input.hits.length > 0,
     20,
-    input.hits.length
-      ? `${input.hits.length} trafień z wielu źródeł`
-      : "Brak wyników discovery",
+    input.hits.length ? `${input.hits.length} trafień z wielu źródeł` : "Brak wyników discovery",
   );
 
   const okSources = input.sources.filter((s) => s.statusCode > 0 && s.statusCode < 400);
@@ -333,12 +342,7 @@ export function scoreEffectiveness(input: {
   );
 
   const links = okSources.reduce((s, x) => s + x.links.length, 0);
-  add(
-    "Graf linków",
-    links >= 5,
-    10,
-    links ? `${links} linków do dalszego crawla` : "Mało linków",
-  );
+  add("Graf linków", links >= 5, 10, links ? `${links} linków do dalszego crawla` : "Mało linków");
 
   const score = max ? Math.round((points / max) * 100) : 0;
   const grade: "A" | "B" | "C" | "D" | "F" =
@@ -355,14 +359,20 @@ export function parseCapexCard(
 ): CapexCard {
   let data: { capex?: Partial<CapexCard> } = {};
   try {
-    const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    const text = raw
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, "");
     data = JSON.parse(text) as typeof data;
   } catch {
     /* fall through to empty card */
   }
   const c = data.capex ?? {};
   const done = new Map(
-    (Array.isArray(c.checklist) ? c.checklist : []).map((i) => [String(i?.item ?? ""), Boolean(i?.done)]),
+    (Array.isArray(c.checklist) ? c.checklist : []).map((i) => [
+      String(i?.item ?? ""),
+      Boolean(i?.done),
+    ]),
   );
   return {
     company: String(c.company || company),
@@ -379,5 +389,7 @@ export function parseCapexCard(
     signals: (Array.isArray(c.signals) ? c.signals : []).map(String).filter(Boolean).slice(0, 8),
     checklist: CAPEX_CHECKLIST.map((item) => ({ item, done: done.get(item) ?? false })),
     sources: citations,
+    people: [],
+    investigateUrl: capexDeepLink(String(c.company || company)),
   };
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   BookOpen,
@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { DEFAULT_ENGINE_IDS, type EngineId } from "@/lib/engines";
 import { spectraAiStatus, spectraSearch } from "@/lib/search";
+import { readCapexDeepLink } from "@/lib/scrape/capex-link";
 import type { SearchMode, SpectraResult } from "@/lib/scrape/types";
 import { cn, formatDuration } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
@@ -24,7 +25,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export const Route = createFileRoute("/")({ component: HomePage });
+type HomeSearch = { mode?: "capex"; q?: string };
+
+function validateHomeSearch(search: Record<string, unknown>): HomeSearch {
+  const mode = search.mode === "capex" ? ("capex" as const) : undefined;
+  const raw = search.q;
+  const q = typeof raw === "string" ? raw.slice(0, 2000) : undefined;
+  return q ? { mode, q } : { mode };
+}
+
+export const Route = createFileRoute("/")({
+  validateSearch: validateHomeSearch,
+  component: HomePage,
+});
 
 const EXAMPLES = [
   { label: "Wikipedia: AI", query: "sztuczna inteligencja", mode: "search" as const },
@@ -60,8 +73,10 @@ function saveHistory(items: HistoryItem[]) {
 }
 
 function HomePage() {
-  const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<SearchMode>("auto");
+  const search = Route.useSearch();
+  const deepQuery = readCapexDeepLink(search);
+  const [query, setQuery] = useState(deepQuery ?? "");
+  const [mode, setMode] = useState<SearchMode>(deepQuery ? "capex" : "auto");
   const [engines, setEngines] = useState<EngineId[]>(DEFAULT_ENGINE_IDS);
   const [useAi, setUseAi] = useState(true);
   const [aiStatus, setAiStatus] = useState<{
@@ -74,10 +89,13 @@ function HomePage() {
   const [result, setResult] = useState<SpectraResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyReady, setHistoryReady] = useState(false);
   const [showEngines, setShowEngines] = useState(false);
+  const deepLinkRan = useRef<string | null>(null);
 
   useEffect(() => {
     setHistory(loadHistory());
+    setHistoryReady(true);
     void spectraAiStatus()
       .then((s) => setAiStatus(s))
       .catch(() => setAiStatus({ available: false, model: "", note: "" }));
@@ -132,6 +150,16 @@ function HomePage() {
     [engines, history, mode, useAi],
   );
 
+  useEffect(() => {
+    if (!historyReady) return;
+    const q = readCapexDeepLink(search);
+    if (!q || deepLinkRan.current === q) return;
+    deepLinkRan.current = q;
+    setQuery(q);
+    setMode("capex");
+    void runSearch(q, "capex");
+  }, [historyReady, runSearch, search]);
+
   const modes = useMemo(
     () =>
       [
@@ -139,7 +167,12 @@ function HomePage() {
         { id: "search" as const, label: "Szukaj", icon: Search, hint: "Discovery + scrape" },
         { id: "url" as const, label: "URL", icon: Globe2, hint: "Bezpośredni crawl" },
         { id: "deep" as const, label: "Deep", icon: Crosshair, hint: "Multi-page" },
-        { id: "capex" as const, label: "Firma / CapEx", icon: Crosshair, hint: "Nazwa firmy lub lista URL" },
+        {
+          id: "capex" as const,
+          label: "Firma / CapEx",
+          icon: Crosshair,
+          hint: "Nazwa, KRS, NIP albo URL",
+        },
       ] as const,
     [],
   );
@@ -171,7 +204,8 @@ function HomePage() {
               <span className="text-fg-muted">kompleksowego przeszukiwania</span>
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-fg-muted sm:text-base">
-              Wpisz pytanie albo wklej URL. SPECTRA zbiera wyniki z wielu darmowych źródeł, scrapuje je równolegle, a opcjonalnie Grok spina je w jedną odpowiedź.
+              Wpisz pytanie albo wklej URL. SPECTRA zbiera wyniki z wielu darmowych źródeł, scrapuje
+              je równolegle, a opcjonalnie Grok spina je w jedną odpowiedź.
             </p>
           </>
         )}
@@ -190,7 +224,11 @@ function HomePage() {
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Zapytanie lub URL strony…"
+                  placeholder={
+                    mode === "capex"
+                      ? "Nazwa firmy, KRS, NIP albo URL…"
+                      : "Zapytanie lub URL strony…"
+                  }
                   className="h-12 border-0 bg-transparent pl-10 pr-10 shadow-none focus-visible:ring-0"
                   autoFocus
                   disabled={loading}
@@ -435,7 +473,11 @@ function HowToSearchCard({
           wewnętrzne, z limitem czasu funkcji.
         </li>
         <li>
-          <span className="font-medium text-fg">4. Grok</span> —{" "}
+          <span className="font-medium text-fg">4. Firma / CapEx</span> — nazwa, KRS albo URL. Link{" "}
+          <span className="font-mono text-fg">?mode=capex&amp;q=</span> otwiera „zbadaj firmę”.
+        </li>
+        <li>
+          <span className="font-medium text-fg">5. Grok</span> —{" "}
           {aiAvailable
             ? `${aiNote ?? "klucz ustawiony"}. Synteza jest próbą — błąd API wraca w wyniku skanu.`
             : "opcjonalny. Dodaj XAI_API_KEY w env Vercel (po publish). Bez klucza crawl działa dalej."}
