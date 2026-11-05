@@ -3,6 +3,11 @@ import { capexDeepLink, capexInvestigateQuery } from "./capex-link.ts";
 import { CHROME_UA, isPublicHttpUrl, SPECTRA_UA } from "./http.ts";
 import { extractRegistryIds, isValidNip, normalizeKrs } from "./krs.ts";
 import { canonicalUrl, dedupeHits, fuseHits, hostnameOf, type RankableHit } from "./rank.ts";
+import {
+  SERPAPI_ENV_KEY,
+  SerpapiBudget,
+  serpapiSearch,
+} from "./serpapi.ts";
 
 /** Free, keyless PL query templates for CapEx / investment discovery. */
 export const CAPEX_TEMPLATES = [
@@ -561,18 +566,48 @@ export function capexCrawlPlan(input: {
 
 export async function searchCapexNews(
   company: string,
-  opts: { fetchImpl?: typeof fetch; perQuery?: number } = {},
+  opts: {
+    fetchImpl?: typeof fetch;
+    perQuery?: number;
+    env?: Record<string, string | undefined>;
+    serpapiBudget?: SerpapiBudget;
+  } = {},
 ): Promise<{
   investment: RankableHit[];
   press: RankableHit[];
   investmentQueries: number;
   pressQueries: number;
+  serpapiCalls?: number;
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
+  const env = opts.env ?? process.env;
+  const budget = opts.serpapiBudget;
+  const apiKey = env[SERPAPI_ENV_KEY]?.trim() ?? "";
+  const useSerpapi = Boolean(apiKey) && Boolean(budget);
   const perQuery = opts.perQuery ?? 4;
   const investQs = capexQueries(company);
   const pressQs = capexSiteQueries(company);
-  const load = async (query: string, limit: number) => {
+  let serpapiCalls = 0;
+  /** Prefer SerpAPI google_news for the first few CapEx queries; RSS for the rest / fallback. */
+  const load = async (query: string, limit: number, preferSerpapi: boolean) => {
+    if (preferSerpapi && useSerpapi && budget && budget.remainingCalls > 0) {
+      try {
+        const hits = await serpapiSearch({
+          engine: "google_news",
+          query,
+          apiKey,
+          fetchImpl,
+          limit,
+          gl: "pl",
+          hl: "pl",
+          budget,
+        });
+        serpapiCalls += 1;
+        if (hits.length) return hits;
+      } catch {
+        /* fall through to free RSS */
+      }
+    }
     try {
       return await googleNews(query, { fetchImpl, limit });
     } catch {
@@ -580,8 +615,8 @@ export async function searchCapexNews(
     }
   };
   const [investGroups, pressGroups] = await Promise.all([
-    Promise.all(investQs.map((query) => load(query, perQuery))),
-    Promise.all(pressQs.map((site) => load(site.query, 3))),
+    Promise.all(investQs.map((query, index) => load(query, perQuery, index < 2))),
+    Promise.all(pressQs.map((site, index) => load(site.query, 3, index < 1))),
   ]);
   const investFused = fuseHits(
     investGroups.map((hits) => ({ source: "google-news", hits })),
@@ -600,5 +635,6 @@ export async function searchCapexNews(
     press,
     investmentQueries: investQs.length,
     pressQueries: pressQs.length,
+    serpapiCalls,
   };
 }

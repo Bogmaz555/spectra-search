@@ -5,6 +5,7 @@ import { adapterPostures } from "@/lib/scrape/adapters";
 import { runSpectra } from "@/lib/scrape/pipeline";
 import type { SearchMode, SpectraResult } from "@/lib/scrape/types";
 import { getXaiStatus } from "@/lib/xai";
+import { getSerpapiStatus } from "@/lib/scrape/serpapi";
 
 const engineIdSchema = z.enum([
   "firecrawl",
@@ -42,6 +43,10 @@ export const spectraSearch = createServerFn({ method: "POST" })
 
 export const spectraAiStatus = createServerFn({ method: "GET" }).handler(async () => {
   return getXaiStatus();
+});
+
+export const spectraSerpapiStatus = createServerFn({ method: "GET" }).handler(async () => {
+  return getSerpapiStatus();
 });
 
 export const spectraEngineCatalog = createServerFn({ method: "GET" }).handler(async () => {

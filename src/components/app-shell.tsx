@@ -81,7 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           SPECTRA szuka w wielu źródłach i scrapuje strony równolegle. Status adaptera mówi, co naprawdę zadziałało.
         </p>
         <p className="mt-1 opacity-70">
-          Darmowe źródła działają bez klucza. Firecrawl, Brave, Serper, Browser Use i Crawl4AI są opcjonalne.
+          Darmowe źródła działają bez klucza. SerpAPI (SERPAPI_API_KEY) jest głównym discovery; Firecrawl, Brave, Serper, Browser Use i Crawl4AI są opcjonalne.
         </p>
       </footer>
     </div>

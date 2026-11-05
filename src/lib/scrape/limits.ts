@@ -43,6 +43,8 @@ export const LIMITS = {
   browserUseCap: 2,
   firecrawlCap: 10,
   crawl4aiCap: 8,
+  /** Max SerpAPI search.json calls per SPECTRA scan (Free Plan). */
+  serpapiCap: 4,
 } as const;
 
 export function clampPages(n: number | undefined, fallback: number): number {
