@@ -357,8 +357,8 @@ users. Full guides + snippets: the **`neon` skill** (database) and the
   `VITE_AUTH_ENABLED=false` only to turn sign-in OFF. Never expose server-only
   vars to the client (only `VITE_`-prefixed reach the browser).
 - **AI features (chat, images, video, voice):** when `XAI_API_KEY` is in the
-  env, the app has real xAI API access (server-only; latest model `grok-4.5`,
-  docs at [docs.x.ai](https://docs.x.ai)) — chat/LLM **plus Imagine
+  env, the app has real xAI API access (server-only; default chat model `grok-4.3`,
+  override with non-empty `XAI_MODEL`; docs at [docs.x.ai](https://docs.x.ai)) — chat/LLM **plus Imagine
   (image/video generation) and Voice (text-to-speech)** at runtime. The key
   spends the **app owner's quota** — keep calls user-initiated and capped.
   See the **`xai-api` skill** (`.grok/skills/xai-api/SKILL.md`) before
@@ -606,7 +606,7 @@ serve:     startup.sh / npm run dev  →  bind 0.0.0.0:8080  (live preview)
 verify:    YOU drive curl / browser tools / browser-smoke.mjs inside the sandbox
 controls:  WASD/vehicle/flight → .grok/skills/controls/SKILL.md; A=left self-test
 og:        keep og:image in root head; svg favicon always; custom og.jpg card is the DEFAULT (DOM games too; plain utilities keep placeholder); brand assets in a parallel `task` by default → .grok/skills/og/SKILL.md
-ai:        XAI_API_KEY in env → real xAI API: chat (grok-4.5) + Imagine image/video + voice TTS (docs.x.ai) → .grok/skills/xai-api/SKILL.md
+ai:        XAI_API_KEY in env → real xAI API: chat (default grok-4.3, override XAI_MODEL) + Imagine image/video + voice TTS (docs.x.ai) → .grok/skills/xai-api/SKILL.md
 sprites:   doctrine → game-asset-core+specialist; pipeline → generate2dsprite (#FF00FF); maps → generate2dmap; dense motion → video2dsprite
 shots:     write QA PNGs under /workspace/screenshots/ — never /tmp
 user sees: live, auto-updating preview in the Grok web UI (never "open localhost")

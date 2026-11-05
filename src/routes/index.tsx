@@ -63,7 +63,12 @@ function HomePage() {
   const [mode, setMode] = useState<SearchMode>("auto");
   const [engines, setEngines] = useState<EngineId[]>(DEFAULT_ENGINE_IDS);
   const [useAi, setUseAi] = useState(true);
-  const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+  const [aiStatus, setAiStatus] = useState<{
+    available: boolean;
+    model: string;
+    note: string;
+  } | null>(null);
+  const aiAvailable = aiStatus === null ? null : aiStatus.available;
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SpectraResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,8 +78,8 @@ function HomePage() {
   useEffect(() => {
     setHistory(loadHistory());
     void spectraAiStatus()
-      .then((s) => setAiAvailable(s.available))
-      .catch(() => setAiAvailable(false));
+      .then((s) => setAiStatus(s))
+      .catch(() => setAiStatus({ available: false, model: "", note: "" }));
   }, []);
 
   const toggleEngine = useCallback((id: EngineId) => {
@@ -149,19 +154,12 @@ function HomePage() {
                 <Radar className="h-3.5 w-3.5 text-signal" />
                 Wiele źródeł · uczciwe statusy
               </span>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs",
-                  aiAvailable
-                    ? "border-success/30 bg-success/10 text-success"
-                    : "border-border bg-surface/80 text-fg-muted",
-                )}
-              >
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/80 px-3 py-1 text-xs text-fg-muted">
                 <Sparkles className="h-3 w-3" />
-                {aiAvailable === null
+                {aiStatus === null
                   ? "Sprawdzam Grok…"
-                  : aiAvailable
-                    ? "Grok gotowy"
+                  : aiStatus.available
+                    ? aiStatus.note
                     : "Grok: dodaj XAI_API_KEY"}
               </span>
             </div>
@@ -248,8 +246,8 @@ function HomePage() {
               <button
                 type="button"
                 title={
-                  aiAvailable
-                    ? "Synteza odpowiedzi przez Grok po scrape"
+                  aiStatus?.available
+                    ? `${aiStatus.note}. Synteza jest próbą — błąd API wraca w wyniku skanu.`
                     : "Wymaga XAI_API_KEY na Vercel"
                 }
                 onClick={() => setUseAi((v) => !v)}
@@ -366,7 +364,7 @@ function HomePage() {
           <EnginePipeline activeIds={engines} />
 
           <div className="space-y-4">
-            <HowToSearchCard aiAvailable={aiAvailable} />
+            <HowToSearchCard aiAvailable={aiAvailable} aiNote={aiStatus?.note ?? null} />
 
             <div className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
               <div className="mb-3 flex items-center gap-2">
@@ -408,7 +406,13 @@ function HomePage() {
   );
 }
 
-function HowToSearchCard({ aiAvailable }: { aiAvailable: boolean | null }) {
+function HowToSearchCard({
+  aiAvailable,
+  aiNote,
+}: {
+  aiAvailable: boolean | null;
+  aiNote: string | null;
+}) {
   return (
     <div className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
       <div className="mb-3 flex items-center gap-2">
@@ -431,7 +435,7 @@ function HowToSearchCard({ aiAvailable }: { aiAvailable: boolean | null }) {
         <li>
           <span className="font-medium text-fg">4. Grok</span> —{" "}
           {aiAvailable
-            ? "włączony: synteza odpowiedzi z wyciągniętych źródeł."
+            ? `${aiNote ?? "klucz ustawiony"}. Synteza jest próbą — błąd API wraca w wyniku skanu.`
             : "opcjonalny. Dodaj XAI_API_KEY w env Vercel (po publish). Bez klucza crawl działa dalej."}
         </li>
       </ol>
