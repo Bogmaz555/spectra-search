@@ -61,6 +61,9 @@ Skala jednego zapytania: do 36 złączonych trafień, domyślnie 6 stron w trybi
 - **Szukaj** — discovery + scrape zróżnicowanych hostów
 - **URL** — jedna publiczna strona
 - **Deep** — więcej stron i linki wewnętrzne
+- **Firma / CapEx** — nazwa, KRS, NIP albo URL. Google News RSS, pięć szablonów `site:` (WNP, Puls Biznesu, Automatyka B2B, Opakowanie, Magazyn Przemysłowy) i cztery ścieżki firmy (`/aktualnosci`, `/inwestycje`, `/o-nas`, `/kontakt`) tylko gdy odpowiedzą HTTP 200. Deep link: `/?mode=capex&q=...`
+
+Odpis KRS idzie z publicznego `api-krs.ms.gov.pl` (zarząd i prokurenci; PESEL nie trafia do karty). NIP spółki jest zamieniany na KRS przez publiczny wykaz VAT, bez klucza. **CEIDG (JDG) nie jest podłączone** — token Biznes.gov.pl wymaga osobnego OK. Sam NIP bez numeru KRS nie wciąga danych osoby fizycznej.
 
 ## Licencja
 

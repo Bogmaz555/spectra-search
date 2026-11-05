@@ -13,13 +13,23 @@ import {
 import { summarizeRuns } from "./aggregate.ts";
 import { runDiscovery } from "./discovery.ts";
 import {
-  capexQueries,
-  googleNews,
+  applyRegistryToCard,
+  capexCrawlPlan,
+  COMPANY_SITE_PATHS,
+  companyOrigins,
+  emptyCapexCard,
   isGoogleNewsHost,
   parseCapexInput,
-  resolveCapexNewsHits,
+  probeCompanyPaths,
+  searchCapexNews,
+  type CapexInput,
 } from "./capex.ts";
-import { fuseHits } from "./rank.ts";
+import {
+  extractRegistryIds,
+  krsSourceResult,
+  resolveCapexRegistry,
+  type KrsRegistry,
+} from "./krs.ts";
 import {
   extractDocument,
   htmlToMarkdown,
@@ -48,7 +58,16 @@ import type {
   SpectraResult,
 } from "./types.ts";
 
-const SKIP_EXT = /\.(png|jpe?g|gif|webp|svg|ico|css|js|mjs|map|woff2?|ttf|mp4|mp3|zip|gz|rar)(\?|$)/i;
+const SKIP_EXT =
+  /\.(png|jpe?g|gif|webp|svg|ico|css|js|mjs|map|woff2?|ttf|mp4|mp3|zip|gz|rar)(\?|$)/i;
+
+function hostnamePath(raw: string): string {
+  try {
+    return new URL(raw).pathname || raw;
+  } catch {
+    return raw;
+  }
+}
 
 type Env = Record<string, string | undefined>;
 
@@ -65,7 +84,12 @@ function emptyMobile(): MobileInsight {
   return { hasAppLinks: false, isMobileOptimized: false };
 }
 
-function blankSource(url: string, engines: EngineRun[], title: string, description: string): SourceResult {
+function blankSource(
+  url: string,
+  engines: EngineRun[],
+  title: string,
+  description: string,
+): SourceResult {
   return {
     url,
     title,
@@ -100,12 +124,24 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
   const url = canonicalUrl(rawUrl) ?? rawUrl;
 
   if (timeLeft(ctx) < 2_000) {
-    runs.push(mkRun("curl-impersonate", "error", 0, "Budżet czasu funkcji wyczerpany — strona pominięta"));
+    runs.push(
+      mkRun("curl-impersonate", "error", 0, "Budżet czasu funkcji wyczerpany — strona pominięta"),
+    );
     return { ...blankSource(url, runs, "Pominięto", "Budżet czasu"), fetchedAt: started };
   }
   if (!(await isPublicHttpUrlResolved(url))) {
-    runs.push(mkRun("curl-impersonate", "error", 0, "URL odrzucony (adres prywatny, lokalny albo nie-HTTP)"));
-    return { ...blankSource(url, runs, "Odrzucony URL", "Adres nie jest publicznym HTTP(S)"), fetchedAt: started };
+    runs.push(
+      mkRun(
+        "curl-impersonate",
+        "error",
+        0,
+        "URL odrzucony (adres prywatny, lokalny albo nie-HTTP)",
+      ),
+    );
+    return {
+      ...blankSource(url, runs, "Odrzucony URL", "Adres nie jest publicznym HTTP(S)"),
+      fetchedAt: started,
+    };
   }
   if (!(await allowedByRobots(url, ctx.fetchImpl))) {
     if (on(ctx, "curl-impersonate")) {
@@ -118,7 +154,12 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       runs.push(mkRun("browser-use", "skipped", 0, "robots.txt — Browser Use nie omija zakazu"));
     }
     return {
-      ...blankSource(url, runs, "Zablokowane przez robots.txt", "Ścieżka jest wyłączona w robots.txt"),
+      ...blankSource(
+        url,
+        runs,
+        "Zablokowane przez robots.txt",
+        "Ścieżka jest wyłączona w robots.txt",
+      ),
       fetchedAt: started,
     };
   }
@@ -141,7 +182,14 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
     } else if (!isPublicHttpUrl(url)) {
       runs.push(mkRun("firecrawl", "skipped", 0, "URL odrzucony przed wywołaniem Firecrawl"));
     } else if (ctx.remote.firecrawl <= 0) {
-      runs.push(mkRun("firecrawl", "skipped", 0, "Limit wywołań Firecrawl na to zapytanie został wyczerpany"));
+      runs.push(
+        mkRun(
+          "firecrawl",
+          "skipped",
+          0,
+          "Limit wywołań Firecrawl na to zapytanie został wyczerpany",
+        ),
+      );
     } else if (timeLeft(ctx) < 3_000) {
       runs.push(mkRun("firecrawl", "skipped", 0, "Za mało czasu na Firecrawl"));
     } else {
@@ -193,11 +241,20 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
 
   if (on(ctx, "curl-impersonate")) {
     if (fromFirecrawl) {
-      runs.push(mkRun("curl-impersonate", "skipped", 0, "Pobranie wykonał Firecrawl — lokalny fetch nie był wołany"));
+      runs.push(
+        mkRun(
+          "curl-impersonate",
+          "skipped",
+          0,
+          "Pobranie wykonał Firecrawl — lokalny fetch nie był wołany",
+        ),
+      );
     } else if (!fetched) {
       runs.push(mkRun("curl-impersonate", "skipped", 0, "Fetch wyłączony"));
     } else if (fetched.robotsBlocked) {
-      runs.push(mkRun("curl-impersonate", "skipped", fetched.durationMs, fetched.error || "robots.txt"));
+      runs.push(
+        mkRun("curl-impersonate", "skipped", fetched.durationMs, fetched.error || "robots.txt"),
+      );
     } else if (fetched.ok) {
       runs.push(
         mkRun(
@@ -222,7 +279,14 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
 
   if (on(ctx, "scrapling")) {
     if (fromFirecrawl) {
-      runs.push(mkRun("scrapling", "skipped", 0, "Stronę pobrał Firecrawl — lokalny retry nie był potrzebny"));
+      runs.push(
+        mkRun(
+          "scrapling",
+          "skipped",
+          0,
+          "Stronę pobrał Firecrawl — lokalny retry nie był potrzebny",
+        ),
+      );
     } else if (!fetched) {
       runs.push(mkRun("scrapling", "skipped", 0, "Brak odpowiedzi do oceny"));
     } else if (fetched.robotsBlocked) {
@@ -261,9 +325,18 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
     if (!browserKey) {
       runs.push(mkRun("browser-use", "skipped", 0, adapterPosture("browser-use", ctx.env).message));
     } else if (fromFirecrawl) {
-      runs.push(mkRun("browser-use", "skipped", 0, "Firecrawl zwrócił treść — Browser Use nie był wołany"));
+      runs.push(
+        mkRun("browser-use", "skipped", 0, "Firecrawl zwrócił treść — Browser Use nie był wołany"),
+      );
     } else if (fetched?.robotsBlocked) {
-      runs.push(mkRun("browser-use", "skipped", 0, "robots.txt zabrania ścieżki — Browser Use jej nie omija"));
+      runs.push(
+        mkRun(
+          "browser-use",
+          "skipped",
+          0,
+          "robots.txt zabrania ścieżki — Browser Use jej nie omija",
+        ),
+      );
     } else if (!thin) {
       runs.push(
         mkRun(
@@ -274,7 +347,14 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
         ),
       );
     } else if (ctx.remote.browser <= 0) {
-      runs.push(mkRun("browser-use", "skipped", 0, "Limit Browser Use na to zapytanie (2) został wyczerpany"));
+      runs.push(
+        mkRun(
+          "browser-use",
+          "skipped",
+          0,
+          "Limit Browser Use na to zapytanie (2) został wyczerpany",
+        ),
+      );
     } else if (timeLeft(ctx) < 3_000) {
       runs.push(mkRun("browser-use", "skipped", 0, "Za mało czasu na Browser Use"));
     } else {
@@ -316,13 +396,16 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
   if (!title) title = finalUrl;
 
   let links = extracted?.links ?? [];
-  if (!links.length && firecrawlLinkList.length) links = firecrawlLinks(firecrawlLinkList, finalUrl);
+  if (!links.length && firecrawlLinkList.length)
+    links = firecrawlLinks(firecrawlLinkList, finalUrl);
   if (!links.length && markdown) links = linksFromMarkdown(markdown, finalUrl);
 
   const crawlRemote = envHas(ctx.env, "CRAWL4AI_API_KEY") || envHas(ctx.env, "CRAWL4AI_BASE_URL");
   if (on(ctx, "crawl4ai")) {
     if (fromFirecrawl && markdown) {
-      runs.push(mkRun("crawl4ai", "skipped", 0, "Markdown dostarczył Firecrawl — Crawl4AI nie był wołany"));
+      runs.push(
+        mkRun("crawl4ai", "skipped", 0, "Markdown dostarczył Firecrawl — Crawl4AI nie był wołany"),
+      );
     } else if (crawlRemote && ctx.remote.crawl4ai > 0 && timeLeft(ctx) > 3_000) {
       ctx.remote.crawl4ai -= 1;
       const t0 = Date.now();
@@ -333,7 +416,14 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       });
       if ("error" in page) {
         if (!markdown && html) markdown = htmlToMarkdown(html, finalUrl);
-        runs.push(mkRun("crawl4ai", "error", Date.now() - t0, `${page.error} · zostawiono lokalny markdown`));
+        runs.push(
+          mkRun(
+            "crawl4ai",
+            "error",
+            Date.now() - t0,
+            `${page.error} · zostawiono lokalny markdown`,
+          ),
+        );
       } else {
         markdown = page.markdown;
         runs.push(
@@ -412,7 +502,9 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
   const wordCount = markdown.split(/\s+/).filter(Boolean).length;
   const structured = [
     ...firecrawlFields,
-    ...(extracted?.structured ?? []).filter((field) => !firecrawlFields.some((f) => f.key === field.key)),
+    ...(extracted?.structured ?? []).filter(
+      (field) => !firecrawlFields.some((f) => f.key === field.key),
+    ),
   ];
 
   return {
@@ -447,7 +539,10 @@ function buildSummary(
     return `Brak wyników dla „${query}”. Spróbuj innego zapytania albo wklej bezpośredni URL.`;
   }
   const lines: string[] = [];
-  if (mode === "url" || (mode === "deep" && hits.some((hit) => hit.source === "direct") && liveSources.length === 0)) {
+  if (
+    mode === "url" ||
+    (mode === "deep" && hits.some((hit) => hit.source === "direct") && liveSources.length === 0)
+  ) {
     const source = sources[0];
     if (source) {
       lines.push(`**${source.title}**`);
@@ -464,9 +559,13 @@ function buildSummary(
       `Znaleziono **${hits.length}** trafień dla „${query}” z ${liveSources.length} źródeł: ${liveSources.map((run) => run.label).join(", ") || "—"}.`,
     );
     if (sources.length) {
-      lines.push(`Pobrano równolegle **${sources.length}** stron (deduplikacja URL, limit hostów).`);
+      lines.push(
+        `Pobrano równolegle **${sources.length}** stron (deduplikacja URL, limit hostów).`,
+      );
       for (const source of sources.slice(0, 3)) {
-        lines.push(`• **${source.title}** — ${(source.description || source.textPreview).slice(0, 140)}`);
+        lines.push(
+          `• **${source.title}** — ${(source.description || source.textPreview).slice(0, 140)}`,
+        );
       }
     }
   }
@@ -479,7 +578,9 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
 
   const mode: SearchMode = req.mode ?? "auto";
   const resolved = resolveMode(query, mode);
-  const enabled = new Set<EngineId>(req.engines?.length ? req.engines : ENGINES.map((engine) => engine.id));
+  const enabled = new Set<EngineId>(
+    req.engines?.length ? req.engines : ENGINES.map((engine) => engine.id),
+  );
   const pageBudget = clampPages(
     req.maxPages,
     resolved === "deep" ? LIMITS.defaultMaxPagesDeep : LIMITS.defaultMaxPagesSearch,
@@ -505,6 +606,10 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
 
   let hits: SearchHit[] = [];
   let discovery: DiscoveryRun[] = [];
+  let capexInput: CapexInput | null = null;
+  let capexRegistry: KrsRegistry | null = null;
+  let capexRegistryTask: Promise<KrsRegistry> | null = null;
+  let capexKrsStarted = 0;
   const queryIsUrl = resolved === "url" || (resolved === "deep" && isUrl(query));
 
   const queue: string[] = [];
@@ -519,47 +624,136 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
   };
 
   if (resolved === "capex") {
-    const input = parseCapexInput(query);
-    const direct: SearchHit[] = input.urls.map((url) => ({ title: url, url, snippet: "URL podany przez użytkownika", source: "direct" }));
-    let found: SearchHit[] = [];
-    if (input.company) {
-      const t1 = Date.now();
-      const newsPromise = (async () => {
-        const groups = await Promise.all(
-          capexQueries(input.company).map(async (q) => {
-            try {
-              return { source: "google-news", hits: await googleNews(q, { limit: 5 }) };
-            } catch {
-              return { source: "google-news", hits: [] };
-            }
-          }),
-        );
-        const fused = fuseHits(groups, input.company).slice(0, 12);
-        const newsHits = await resolveCapexNewsHits(fused, { limit: fused.length });
-        return { groups, newsHits };
-      })();
-      const [news, general] = await Promise.all([
-        newsPromise,
-        runDiscovery(`${input.company} inwestycja`, { env }),
-      ]);
-      const publisherLinks = news.newsHits.filter((hit) => !isGoogleNewsHost(hit.url)).length;
+    capexInput = parseCapexInput(query);
+    const input = capexInput;
+    capexKrsStarted = Date.now();
+    if (input.krs || input.nip) {
+      capexRegistryTask = resolveCapexRegistry({
+        krs: input.krs,
+        nip: input.nip,
+        fetchImpl: ctx.fetchImpl,
+      });
+    }
+    const userOrigin = companyOrigins(input.company, input.urls, [])[0];
+    const timedProbe = async (origin: string | undefined) => {
+      if (!origin || timeLeft(ctx) < 4_000) return { paths: [] as string[], ms: 0 };
+      const started = Date.now();
+      try {
+        const paths = await probeCompanyPaths(origin, { fetchImpl: ctx.fetchImpl });
+        return { paths, ms: Date.now() - started };
+      } catch {
+        return { paths: [] as string[], ms: Date.now() - started };
+      }
+    };
+    const recordNews = (news: Awaited<ReturnType<typeof searchCapexNews>>, started: number) => {
+      const publishers = news.investment.filter((hit) => !isGoogleNewsHost(hit.url)).length;
       discovery.push({
         id: "google-news",
         label: "Google News RSS (szablony CapEx)",
-        status: news.newsHits.length ? "live" : "error",
-        hits: news.newsHits.length,
-        durationMs: Date.now() - t1,
-        message: news.newsHits.length
-          ? `${news.newsHits.length} newsów z ${news.groups.length} zapytań, ${publisherLinks} linków wydawcy`
+        status: news.investment.length ? "live" : "error",
+        hits: news.investment.length,
+        durationMs: Date.now() - started,
+        message: news.investment.length
+          ? `${news.investment.length} newsów z ${news.investmentQueries} zapytań, ${publishers} linków wydawcy`
           : "Brak newsów / błąd RSS",
       });
+      discovery.push({
+        id: "capex-press",
+        label: "Prasa branżowa (site:)",
+        status: "live",
+        hits: news.press.length,
+        durationMs: Date.now() - started,
+        message: news.press.length
+          ? `${news.press.length} trafień z ${news.pressQueries} tytułów`
+          : `Brak trafień · ${news.pressQueries} szablonów site: (WNP, Puls Biznesu, automatyka, opakowania, przemysł)`,
+      });
+    };
+
+    const direct: SearchHit[] = input.urls.map((url) => ({
+      title: url,
+      url,
+      snippet: "URL podany przez użytkownika",
+      source: "direct",
+    }));
+    let found: SearchHit[] = [];
+    let paths: string[] = [];
+    let probeMs = 0;
+    let probedOrigin = userOrigin;
+
+    if (input.company) {
+      const t1 = Date.now();
+      const [news, general, probed] = await Promise.all([
+        searchCapexNews(input.company, { fetchImpl: ctx.fetchImpl }),
+        runDiscovery(`${input.company} inwestycja`, { env, fetchImpl: ctx.fetchImpl }),
+        timedProbe(userOrigin),
+      ]);
+      recordNews(news, t1);
       discovery.push(...general.runs);
-      found = [...news.newsHits, ...general.hits];
+      found = [...news.investment, ...news.press, ...general.hits];
+      paths = probed.paths;
+      probeMs = probed.ms;
+    } else if (capexRegistryTask && timeLeft(ctx) > 8_000) {
+      capexRegistry = await capexRegistryTask;
+      const legalName = capexRegistry.name?.trim();
+      if (legalName) {
+        const t1 = Date.now();
+        const news = await searchCapexNews(legalName, { fetchImpl: ctx.fetchImpl });
+        recordNews(news, t1);
+        found = [...news.investment, ...news.press];
+      }
+      const probed = await timedProbe(userOrigin);
+      paths = probed.paths;
+      probeMs = probed.ms;
+    } else {
+      const probed = await timedProbe(userOrigin);
+      paths = probed.paths;
+      probeMs = probed.ms;
     }
-    hits = [...direct, ...found];
-    enqueue(direct.map((h) => h.url));
+
+    if (!paths.length && !userOrigin && timeLeft(ctx) > 4_000) {
+      const fromHits = companyOrigins(
+        input.company || capexRegistry?.name || "",
+        [],
+        found.map((hit) => hit.url),
+      )[0];
+      if (fromHits) {
+        probedOrigin = fromHits;
+        const probed = await timedProbe(fromHits);
+        paths = probed.paths;
+        probeMs = probed.ms;
+      }
+    }
+
+    discovery.push({
+      id: "company-paths",
+      label: "Ścieżki firmy",
+      status: paths.length ? "live" : "skipped",
+      hits: paths.length,
+      durationMs: probeMs,
+      message: paths.length
+        ? paths.map((url) => hostnamePath(url)).join(", ")
+        : probedOrigin
+          ? `Brak HTTP 200 na ${COMPANY_SITE_PATHS.join(" ")} (${probedOrigin})`
+          : "Brak domeny firmy (URL użytkownika albo host wyników)",
+    });
+
+    const pathHits: SearchHit[] = paths.map((url) => ({
+      title: hostnamePath(url),
+      url,
+      snippet: "Ścieżka firmy · HTTP 200",
+      source: "company-site",
+    }));
+    hits = [...direct, ...pathHits, ...found];
     const crawlable = found.filter((hit) => !isGoogleNewsHost(hit.url));
-    enqueue(selectDiverse(crawlable, Math.max(0, targetPages - direct.length), 2).map((hit) => hit.url));
+    const newsPick = selectDiverse(crawlable, targetPages, 2).map((hit) => hit.url);
+    enqueue(
+      capexCrawlPlan({
+        direct: direct.map((hit) => hit.url),
+        companyPaths: paths,
+        news: newsPick,
+        maxPages: targetPages,
+      }),
+    );
   } else if (queryIsUrl && (resolved === "url" || resolved === "deep")) {
     const url = normalizeUrl(query);
     hits = [{ title: url, url, snippet: "Bezpośredni crawl URL", source: "direct" }];
@@ -568,8 +762,7 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     const found = await runDiscovery(query, { env });
     hits = found.hits;
     discovery = found.runs;
-    const seed =
-      resolved === "deep" ? Math.min(LIMITS.deepSeedPages, targetPages) : targetPages;
+    const seed = resolved === "deep" ? Math.min(LIMITS.deepSeedPages, targetPages) : targetPages;
     enqueue(selectDiverse(hits, seed, 2).map((hit) => hit.url));
   }
 
@@ -599,8 +792,63 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
         enqueue(follow);
       }
     }
-    // CapEx drains the queued publisher/user URLs. It does not follow internal links.
+    // CapEx drains company paths and publisher URLs. It does not follow internal links.
     if (resolved !== "deep" && resolved !== "capex") break;
+  }
+
+  if (resolved === "capex" && capexInput) {
+    if (capexRegistryTask && !capexRegistry) {
+      try {
+        capexRegistry = await capexRegistryTask;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "błąd KRS";
+        capexRegistry = { people: [], note: `KRS niedostępne (${message.slice(0, 140)})` };
+      }
+    }
+    if (!capexRegistry?.people.length) {
+      const blob = sources
+        .map((source) => `${source.title}\n${source.markdown}`)
+        .join("\n")
+        .slice(0, 80_000);
+      const ids = extractRegistryIds(blob);
+      if (ids.krs && ids.krs !== capexRegistry?.krs) {
+        try {
+          capexRegistry = await resolveCapexRegistry({
+            krs: ids.krs,
+            nip: ids.nip ?? capexInput.nip,
+            fetchImpl: ctx.fetchImpl,
+          });
+        } catch {
+          /* keep the earlier note */
+        }
+      } else if (!capexRegistry && ids.nip) {
+        try {
+          capexRegistry = await resolveCapexRegistry({ nip: ids.nip, fetchImpl: ctx.fetchImpl });
+        } catch {
+          capexRegistry = null;
+        }
+      }
+    }
+    const registrySource = capexRegistry ? krsSourceResult(capexRegistry) : null;
+    if (registrySource && !sources.some((source) => source.url === registrySource.url)) {
+      sources.unshift(registrySource);
+      hits.unshift({
+        title: registrySource.title,
+        url: registrySource.url,
+        snippet: registrySource.description || "Odpis aktualny KRS",
+        source: "krs",
+      });
+    }
+    discovery.push({
+      id: "krs",
+      label: "KRS (api-krs.ms.gov.pl)",
+      status: capexRegistry?.people.length ? "live" : "skipped",
+      hits: capexRegistry?.people.length ?? 0,
+      durationMs: capexKrsStarted ? Date.now() - capexKrsStarted : 0,
+      message: capexRegistry?.people.length
+        ? `${capexRegistry.people.length} osób (zarząd i prokurenci) · KRS ${capexRegistry.krs}`
+        : capexRegistry?.note || "Brak numeru KRS / NIP w zapytaniu i w treści",
+    });
   }
 
   if (resolved === "deep") {
@@ -634,7 +882,15 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     globalRuns.push(mkRun("scrcpy", "skipped", 0, adapterPosture("scrcpy", env).message));
   }
 
-  const summarized = new Map(ENGINES.map((engine) => [engine.id, summarizeRuns(engine.id, globalRuns.filter((run) => run.id === engine.id))]));
+  const summarized = new Map(
+    ENGINES.map((engine) => [
+      engine.id,
+      summarizeRuns(
+        engine.id,
+        globalRuns.filter((run) => run.id === engine.id),
+      ),
+    ]),
+  );
   const engines: EngineRun[] = ENGINES.map((engine) => {
     if (!enabled.has(engine.id)) return mkRun(engine.id, "skipped", 0, "Wyłączony w tym skanie");
     const run = summarized.get(engine.id);
@@ -666,8 +922,18 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
       hits,
       sources,
       timeoutMs: synthesisAbortMs(Date.now() - t0),
-      capex: resolved === "capex" ? parseCapexInput(query).company || sources[0]?.title || query : undefined,
+      capex: resolved === "capex" ? capexInput?.company || capexRegistry?.name || query : undefined,
+      registryContext: capexRegistry?.markdown,
     });
+  }
+  if (
+    resolved === "capex" &&
+    capexInput &&
+    (ai.capex || capexRegistry?.people.length || capexRegistry?.note || capexRegistry?.krs)
+  ) {
+    const company = capexInput.company || capexRegistry?.name || query;
+    const base = ai.capex ?? emptyCapexCard(company, ai.citations);
+    ai = { ...ai, capex: applyRegistryToCard(base, capexRegistry, company) };
   }
 
   return {
