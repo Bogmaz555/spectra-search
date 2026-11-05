@@ -4,6 +4,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { nitro } from "nitro/vite";
+import { FUNCTION_MAX_DURATION_SEC } from "./src/lib/scrape/limits.ts";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 
@@ -152,7 +153,8 @@ export default defineConfig(({ command }) => ({
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
             vercel: {
-              functions: { maxDuration: 60 },
+              // Crawl budget is 45s; Grok synthesis may use up to 90s after that.
+              functions: { maxDuration: FUNCTION_MAX_DURATION_SEC },
             },
           }),
         ]
