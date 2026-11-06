@@ -1,0 +1,125 @@
+{
+  "docker_executed": false,
+  "note": "Compared in this process. Docker was not installed, so the image was not run. max_rss_kb is the comparison process only and does not include Chromium. A separate sample of Python plus Chrome during one browser fetch peaked at browser_peak_rss_kb.",
+  "max_rss_kb": 61416,
+  "browser_peak_rss_kb": 1221896,
+  "rows": [
+    {
+      "url": "https://example.com/",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://example.com/",
+        "text_chars": 577,
+        "marker_present": false,
+        "duration_ms": 71
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://example.com/",
+        "title": "Example Domain",
+        "quote_count": 0,
+        "first_quote": null,
+        "text_chars": 171,
+        "marker_present": false,
+        "duration_ms": 176,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://example.com/",
+        "title": "Example Domain",
+        "quote_count": 0,
+        "first_quote": null,
+        "text_chars": 927,
+        "marker_present": false,
+        "duration_ms": 1161,
+        "error": null
+      }
+    },
+    {
+      "url": "https://quotes.toscrape.com/",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/",
+        "text_chars": 11021,
+        "marker_present": true,
+        "duration_ms": 114
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/",
+        "title": "Quotes to Scrape",
+        "quote_count": 10,
+        "first_quote": "“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”",
+        "text_chars": 1990,
+        "marker_present": true,
+        "duration_ms": 227,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/",
+        "title": "Quotes to Scrape",
+        "quote_count": 10,
+        "first_quote": "“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”",
+        "text_chars": 1990,
+        "marker_present": true,
+        "duration_ms": 1434,
+        "error": null
+      }
+    },
+    {
+      "url": "https://quotes.toscrape.com/js/",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/js/",
+        "text_chars": 5806,
+        "marker_present": true,
+        "duration_ms": 112
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/js/",
+        "title": "Quotes to Scrape",
+        "quote_count": 0,
+        "first_quote": null,
+        "text_chars": 130,
+        "marker_present": false,
+        "duration_ms": 171,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/js/",
+        "title": "Quotes to Scrape",
+        "quote_count": 10,
+        "first_quote": "“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”",
+        "text_chars": 1571,
+        "marker_present": true,
+        "duration_ms": 1384,
+        "error": null
+      }
+    }
+  ]
+}
