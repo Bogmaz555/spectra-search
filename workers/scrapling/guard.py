@@ -14,6 +14,11 @@ _BLOCKED_SUFFIXES = (".local", ".localhost", ".internal", ".localdomain")
 _BLOCKED_HOSTS = {"localhost", "localhost.localdomain", "metadata.google.internal"}
 
 
+def is_public_ip(addr: str) -> bool:
+    ip = ipaddress.ip_address(addr.split("%", 1)[0])
+    return _is_public(ip)
+
+
 def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
@@ -29,10 +34,10 @@ def _is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
 
 def assert_public_url(url: str) -> str:
-    """Return the URL only when every resolved address is public HTTP(S)."""
+    """Return the URL only when every resolved address is public HTTP(S) or WebSocket."""
     raw = (url or "").strip()
     parsed = urlsplit(raw)
-    if parsed.scheme not in {"http", "https"}:
+    if parsed.scheme not in {"http", "https", "ws", "wss"}:
         raise GuardError("Tylko http i https")
     if parsed.username or parsed.password:
         raise GuardError("Adres z loginem jest odrzucony")

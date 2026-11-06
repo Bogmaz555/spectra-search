@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && python -m patchright install chromium \
     && chown -R nobody:nogroup /ms-playwright
 
-COPY --chown=nobody:nogroup guard.py extract.py worker.py ./
+COPY --chown=nobody:nogroup guard.py egress.py extract.py worker.py ./
 ENV WORKER_IN_DOCKER=1
 ENV HOME=/tmp
 EXPOSE 8765

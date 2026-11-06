@@ -11,15 +11,19 @@ No API key, no paid host, no tunnel. The process listens on `127.0.0.1` only. Do
 
 The review machine had no `docker` binary. The image was **not** built and **not** started. Numbers below are from a local process with packages installed under an isolated directory (`pip install --target`), not from a container.
 
-Measured on that run (see `evidence/compare.json`):
+Measured against public company pages and one JavaScript fixture (see `evidence/compare.json`). Plain `urllib` returns the raw file. Scrapling returns visible text plus fields it parsed.
 
-| URL | Plain `urllib` | Scrapling HTTP (`Fetcher`) | Scrapling browser (`StealthyFetcher`) |
+| URL | Plain download | Scrapling HTTP | Scrapling browser |
 | --- | --- | --- | --- |
-| `https://example.com/` | 577 bytes, 71 ms. The title is in the file. | 200 in 176 ms. Parsed title `Example Domain`. Visible text 171 chars. No extra facts. | 200 in 1161 ms. Same title. No extra facts. |
-| `https://quotes.toscrape.com/` | 11021 bytes, 114 ms. The quote sentence is already in the HTML. | 200 in 227 ms. CSS `.quote .text` returns **10** quote strings. | 200 in 1434 ms. Same 10 quote strings. |
-| `https://quotes.toscrape.com/js/` | 5806 bytes, 112 ms. A string search finds the sentence inside the page source. | 200 in 171 ms. Visible text 130 chars. CSS finds **0** quote nodes. | 200 in 1384 ms. CSS finds **10** quote nodes after JavaScript runs. |
+| `https://pl.wikipedia.org/wiki/Mlekovita` | 138967 bytes in 41 ms. The facts are inside the HTML and are not fields. | 200 in 302 ms. Infobox: ul. Ludowa 122, Wysokie Mazowieckie; president Dariusz Sapiński; KRS 0000074309; employment 5300 (2025). | 200 in 1971 ms. The same four fields and about 800 more characters. No new fact. |
+| `https://mlekovita.com.pl/` | 526122 bytes in 674 ms. | 200 in 643 ms. Title “MLEKOVITA – Twoja mleczna droga”. About 45k characters of visible text. No separate investment record. | 200 in 6033 ms. About 48k characters. No additional structured investment fact. |
+| `https://www.tygodnik-rolniczy.pl` | 398964 bytes in 490 ms. Publisher home page named by Google News RSS, not one article. | 200 in 554 ms. About 23k characters of visible text. | 200 in 5684 ms. About 23k characters. No extra article. |
+| `https://investmap.pl/` | Follow-up call, not the first loop. | 200 in 1426 ms. Property-market title. 9708 visible characters. | 200 in 15225 ms. 9814 characters. The only extra visible line was the cookie notice. |
+| `https://quotes.toscrape.com/js/` | 5806 bytes. The sentence is in the source, not as quote nodes. | CSS finds 0 quote nodes. | CSS finds 10 quote nodes in about 1s. This is where the browser adds structure. |
 
-`max_rss_kb` in the JSON (61416) is only the Python process. A separate sample of Python plus Chrome during one browser fetch peaked at about **1.2 GB** (`browser_peak_rss_kb`). The compose file caps the container at 2 GB. One request at a time. HTTP timeout 12s, browser timeout 20s, at most 4 redirects, no retries.
+Python-only RSS in the comparison was about 70 MB and does **not** include Chromium. A separate sample of Python plus Chrome during one browser fetch peaked at about **1.2 GB**. The compose file caps the container at 2 GB. One request at a time. HTTP timeout 12s, browser timeout 20s, at most 4 redirects, no retries.
+
+On these company pages the useful structured record came from the HTTP parser. The browser was slower and, apart from the JavaScript fixture, did not add an investment fact.
 
 ## Run locally without Docker
 
@@ -61,9 +65,21 @@ Then use `http://127.0.0.1:8765` from the same machine. Do not publish `0.0.0.0:
 
 ## Safety
 
-Before Scrapling is called, the URL must be `http` or `https`, must not contain a username or password, and every DNS answer must be a public address. Loopback, private, link-local, and mapped IPv6 loopback are rejected. Scrapling is called with `follow_redirects="safe"` and `max_redirects=4`, which is that library's own block on redirects to private addresses. After the response, the final URL and redirect history are checked again; a private hop drops the body.
+Checking only the address the user typed is not enough. A public page can still ask the browser for `169.254.169.254`, another loopback port, or a name that resolves to a private address.
 
-The worker does not crawl further links. It does not read or return API keys.
+Browser mode therefore does three things:
+
+- a route installed before navigation aborts any request that is not public HTTP(S) or WebSocket
+- Chromium is pointed at a proxy on `127.0.0.1` that resolves the name again and opens the socket only to that public IP
+- WebRTC is forced through the proxy, DNS prefetch is disabled, and images, fonts, and media are not downloaded
+
+HTTP mode does not run subresources. It uses Scrapling's `follow_redirects="safe"` (curl refuses a redirect onto a private IP) and the same public-address check on the final URL. One job at a time. Address length is capped at 2048 characters. Returned text is capped at 100000 characters. The proxy allows at most 12 connections and 1.5 MB through each tunnel.
+
+How this could later sit next to hosted Spectra, and why Vercel must not dial the laptop, is in `INTEGRATION.md`. That wiring is not implemented.
+
+## Docker
+
+`docker` is not installed in the environment that produced `evidence/compare.json`. The image was not built. Do not read the Dockerfile as a passed build. The apt package list is a best-effort set for Chromium and was not executed.
 
 ## Not in this prototype
 

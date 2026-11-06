@@ -5,9 +5,11 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from egress import EgressProxy, install_request_guard
 from guard import GuardError, assert_public_url
 
 MAX_TEXT = 100_000
+MAX_URL = 2_048
 HTTP_TIMEOUT_S = 12
 BROWSER_TIMEOUT_MS = 20_000
 MAX_REDIRECTS = 4
@@ -38,6 +40,8 @@ def extract_url(url: str, mode: str = "http") -> dict[str, Any]:
     """
     if mode not in {"http", "browser"}:
         raise GuardError("Tryb musi być http albo browser")
+    if len(url) > MAX_URL:
+        raise GuardError("Adres jest za długi")
     checked = assert_public_url(url)
     started = time.perf_counter()
     try:
@@ -56,14 +60,22 @@ def extract_url(url: str, mode: str = "http") -> dict[str, Any]:
         else:
             from scrapling.fetchers import StealthyFetcher
 
-            page = StealthyFetcher.fetch(
-                checked,
-                headless=True,
-                timeout=BROWSER_TIMEOUT_MS,
-                follow_redirects="safe",
-                max_redirects=MAX_REDIRECTS,
-                network_idle=True,
-            )
+            blocked: list[str] = []
+            with EgressProxy() as proxy:
+                page = StealthyFetcher.fetch(
+                    checked,
+                    headless=True,
+                    timeout=BROWSER_TIMEOUT_MS,
+                    follow_redirects="safe",
+                    max_redirects=MAX_REDIRECTS,
+                    network_idle=False,
+                    retries=1,
+                    disable_resources=True,
+                    block_webrtc=True,
+                    proxy=proxy.url,
+                    page_setup=lambda browser_page: install_request_guard(browser_page, blocked),
+                    extra_flags=["--dns-prefetch-disable"],
+                )
             library = "scrapling.fetchers.StealthyFetcher"
     except GuardError:
         raise
@@ -91,7 +103,14 @@ def extract_url(url: str, mode: str = "http") -> dict[str, Any]:
         }
 
     quotes = [_as_text(item) for item in page.css(".quote .text::text").getall()]
-    headings = [_as_text(item) for item in page.css("h1::text").getall()][:8]
+    headings = [" ".join(_as_text(item).split()) for item in page.css("h1::text").getall()]
+    headings = [item for item in headings if item][:8]
+    infobox: list[dict[str, str]] = []
+    for row in page.css("table.infobox tr")[:12]:
+        key = _as_text(row.css("th::text").get()).strip()
+        value = " ".join(_as_text(part) for part in row.css("td ::text").getall()).strip()
+        if key and value:
+            infobox.append({"key": key[:80], "value": " ".join(value.split())[:240]})
     title = _as_text(page.css("title::text").get())
     description = _as_text(page.css("meta[name=description]::attr(content)").get())
     text = _as_text(page.get_all_text())
@@ -115,6 +134,7 @@ def extract_url(url: str, mode: str = "http") -> dict[str, Any]:
         "title": title[:300],
         "description": description[:500],
         "headings": headings,
+        "infobox": infobox,
         "quotes": quotes[:20],
         "link_count": len(links),
         "links": links,

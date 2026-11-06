@@ -8,6 +8,7 @@ Run from this directory with PYTHONPATH pointing at the scrapling install:
 from __future__ import annotations
 
 import json
+import re
 import resource
 import time
 import urllib.request
@@ -15,11 +16,33 @@ from pathlib import Path
 
 from extract import extract_url
 
+def investment_article() -> str | None:
+    """One publisher URL from public Google News RSS. Not a Google News shell."""
+    query = "https://news.google.com/rss/search?q=Mlekovita+inwestycja&hl=pl&gl=PL&ceid=PL:pl"
+    try:
+        with urllib.request.urlopen(query, timeout=12) as response:
+            xml = response.read(400_000).decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    found = [
+        source
+        for source in re.findall(r'<source url="(https://[^"]+)"', xml)
+        if "news.google." not in source and "google.com" not in source
+    ]
+    for source in found:
+        if "investmap.pl" in source:
+            return source
+    return found[0] if found else None
+
+
 URLS = [
-    "https://example.com/",
-    "https://quotes.toscrape.com/",
+    "https://pl.wikipedia.org/wiki/Mlekovita",
+    "https://mlekovita.com.pl/",
     "https://quotes.toscrape.com/js/",
 ]
+extra = investment_article()
+if extra:
+    URLS.append(extra)
 MARKER = "The world as we have created it is a process of our thinking"
 
 
@@ -55,6 +78,8 @@ def slim(result: dict) -> dict:
         "title": result.get("title"),
         "quote_count": len(result.get("quotes") or []),
         "first_quote": (result.get("quotes") or [None])[0],
+        "headings": result.get("headings") or [],
+        "infobox": result.get("infobox") or [],
         "text_chars": result.get("text_chars"),
         "marker_present": MARKER in text,
         "duration_ms": result.get("duration_ms"),
