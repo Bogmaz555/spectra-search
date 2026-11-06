@@ -38,8 +38,18 @@ export type EngineCapability =
 /** How this deployment can run the named project. */
 export type EngineRuntime = "degraded" | "optional" | "unavailable";
 
+export type EngineSurface = "local" | "optional" | "unavailable";
+
 export interface EngineDef {
   id: EngineId;
+  /** What the search UI should call this step. Not a claim that the GitHub project ran. */
+  searchLabel: string;
+  /**
+   * `local` — our own fetch/parse step.
+   * `optional` — a real external API, only with a key.
+   * `unavailable` — not part of web search in this deployment (hidden from the scan).
+   */
+  surface: EngineSurface;
   name: string;
   repo: string;
   github: string;
@@ -63,6 +73,8 @@ export interface EngineDef {
 export const ENGINES: EngineDef[] = [
   {
     id: "curl-impersonate",
+    searchLabel: "Pobranie HTTP",
+    surface: "local",
     name: "curl-impersonate",
     repo: "lwthiker/curl-impersonate",
     github: "https://github.com/lwthiker/curl-impersonate",
@@ -72,7 +84,7 @@ export const ENGINES: EngineDef[] = [
     capabilities: ["fetch"],
     runtime: "degraded",
     runtimeNote:
-      "Aproksymacja: nagłówki zbliżone do Chrome przez fetch. Binarka curl-impersonate (TLS/JA3) nie działa na Vercel serverless.",
+      "Krok lokalny: nagłówki zbliżone do Chrome przez fetch. Binarka curl-impersonate (TLS/JA3) nie działa na Vercel serverless.",
     tagline: "Pobieranie HTTP — bez udawanego TLS",
     description:
       "Prawdziwy curl-impersonate podszywa się pod Chrome na poziomie TLS. Tutaj zostają nagłówki przeglądarki, timeout, retry i ręczna obsługa przekierowań. To nie jest ta binarka.",
@@ -82,6 +94,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "scrapling",
+    searchLabel: "Detekcja blokady",
+    surface: "local",
     name: "Scrapling",
     repo: "D4Vinci/Scrapling",
     github: "https://github.com/D4Vinci/Scrapling",
@@ -91,7 +105,7 @@ export const ENGINES: EngineDef[] = [
     capabilities: ["adapt", "fetch"],
     runtime: "degraded",
     runtimeNote:
-      "Aproksymacja: drugi profil nagłówków i detekcja blokad (403/429/CAPTCHA). Biblioteka Scrapling (Python) nie jest uruchomiona.",
+      "Krok lokalny: drugi profil nagłówków i detekcja blokad (403/429/CAPTCHA). Biblioteka Scrapling (Python) nie jest uruchomiona.",
     tagline: "Retry i detekcja blokad, nie Scrapling",
     description:
       "Scrapling sam dostosowuje selektory i omija antyboty. W tym wdrożeniu jest tylko lokalny retry oraz rozpoznanie strony blokady. Nie nazywamy tego Scraplingiem.",
@@ -101,6 +115,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "browser-use",
+    searchLabel: "Browser Use",
+    surface: "optional",
     name: "Browser Use",
     repo: "browser-use/browser-use",
     github: "https://github.com/browser-use/browser-use",
@@ -121,6 +137,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "crawlee",
+    searchLabel: "Crawlee",
+    surface: "unavailable",
     name: "Crawlee",
     repo: "apify/crawlee",
     github: "https://github.com/apify/crawlee",
@@ -140,6 +158,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "scrapy",
+    searchLabel: "Scrapy",
+    surface: "unavailable",
     name: "Scrapy",
     repo: "scrapy/scrapy",
     github: "https://github.com/scrapy/scrapy",
@@ -159,6 +179,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "autoscraper",
+    searchLabel: "Heurystyka list",
+    surface: "local",
     name: "AutoScraper",
     repo: "alirezamika/autoscraper",
     github: "https://github.com/alirezamika/autoscraper",
@@ -168,7 +190,7 @@ export const ENGINES: EngineDef[] = [
     capabilities: ["pattern", "extract"],
     runtime: "degraded",
     runtimeNote:
-      "Aproksymacja: heurystyka list, kart i tabel (CSS). AutoScraper (Python, uczenie z przykładu) nie jest uruchomiony.",
+      "Krok lokalny: heurystyka list, kart i tabel (CSS). AutoScraper (Python, uczenie z przykładu) nie jest uruchomiony.",
     tagline: "Wzorce z heurystyki, nie z AutoScraper",
     description:
       "AutoScraper uczy się reguł z przykładu. Tutaj powtarzalne listy i karty wykrywa stały zestaw selektorów. To lokalna heurystyka, oznaczona jako aproksymacja.",
@@ -178,6 +200,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "firecrawl",
+    searchLabel: "Firecrawl",
+    surface: "optional",
     name: "Firecrawl",
     repo: "firecrawl/firecrawl",
     github: "https://github.com/firecrawl/firecrawl",
@@ -198,6 +222,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "crawl4ai",
+    searchLabel: "Markdown",
+    surface: "local",
     name: "Crawl4AI",
     repo: "unclecode/crawl4ai",
     github: "https://github.com/unclecode/crawl4ai",
@@ -208,7 +234,7 @@ export const ENGINES: EngineDef[] = [
     runtime: "degraded",
     envKeys: ["CRAWL4AI_API_KEY", "CRAWL4AI_BASE_URL"],
     runtimeNote:
-      "Aproksymacja: lokalny HTML→Markdown (Cheerio). Crawl4AI (Python + przeglądarka) nie działa na Vercel. Ustaw CRAWL4AI_API_KEY (chmura) albo CRAWL4AI_BASE_URL (własne /md).",
+      "Krok lokalny: HTML→Markdown (Cheerio). Crawl4AI (Python + przeglądarka) nie działa na Vercel. Ustaw CRAWL4AI_API_KEY (chmura) albo CRAWL4AI_BASE_URL (własne /md), żeby wołać prawdziwe API.",
     tagline: "Markdown lokalnie albo z własnego API",
     description:
       "Crawl4AI zamienia strony w markdown przez przeglądarkę. Bez klucza lub adresu instancji SPECTRA używa własnego konwertera i oznacza to jako aproksymację. Z CRAWL4AI_API_KEY woła api.crawl4ai.com, z CRAWL4AI_BASE_URL — self-host POST /md.",
@@ -218,6 +244,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "markitdown",
+    searchLabel: "Normalizacja tekstu",
+    surface: "local",
     name: "MarkItDown",
     repo: "microsoft/markitdown",
     github: "https://github.com/microsoft/markitdown",
@@ -227,7 +255,7 @@ export const ENGINES: EngineDef[] = [
     capabilities: ["markdown"],
     runtime: "degraded",
     runtimeNote:
-      "Aproksymacja: normalizacja już wyciągniętego Markdown. MarkItDown (Python, PDF i Office) nie jest uruchomiony — pliki binarne nie są konwertowane.",
+      "Krok lokalny: normalizacja już wyciągniętego Markdown. MarkItDown (Python, PDF i Office) nie jest uruchomiony — pliki binarne nie są konwertowane.",
     tagline: "Czyszczenie Markdown, nie konwersja Office",
     description:
       "MarkItDown Microsoftu czyta PDF, Office i HTML. Tutaj jest tylko porządkowanie tekstu Markdown. PDF i dokumenty Office bez osobnego API zostają nietknięte.",
@@ -237,6 +265,8 @@ export const ENGINES: EngineDef[] = [
   },
   {
     id: "scrcpy",
+    searchLabel: "scrcpy",
+    surface: "unavailable",
     name: "scrcpy",
     repo: "Genymobile/scrcpy",
     github: "https://github.com/Genymobile/scrcpy",
@@ -261,4 +291,7 @@ export const ENGINE_MAP = Object.fromEntries(ENGINES.map((e) => [e.id, e])) as R
   EngineDef
 >;
 
-export const DEFAULT_ENGINE_IDS: EngineId[] = ENGINES.map((e) => e.id);
+/** Steps that can actually run. Scrapy, Crawlee and scrcpy stay out of the scan. */
+export const DEFAULT_ENGINE_IDS: EngineId[] = ENGINES.filter((e) => e.surface !== "unavailable").map(
+  (e) => e.id,
+);

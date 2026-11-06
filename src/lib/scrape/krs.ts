@@ -267,6 +267,28 @@ async function krsFromNip(
   };
 }
 
+/** Status for the CapEx KRS row. Transport failures are errors; a missing id is not. */
+export function krsDiscoveryStatus(registry: KrsRegistry | null | undefined): {
+  status: "live" | "error" | "skipped";
+  message: string;
+} {
+  if (!registry || (!registry.krs && !registry.nip && !registry.note && registry.people.length === 0)) {
+    return {
+      status: "skipped",
+      message: "Nie dotyczy — brak numeru KRS albo NIP w zapytaniu i w treści stron.",
+    };
+  }
+  if (registry.people.length) {
+    return {
+      status: "live",
+      message: `${registry.people.length} osób (zarząd i prokurenci)${registry.krs ? ` · KRS ${registry.krs}` : ""}`,
+    };
+  }
+  const note = registry.note?.trim() || "";
+  if (/niedostępn/i.test(note)) return { status: "error", message: note };
+  return { status: "skipped", message: note || "Odpis nie zawiera zarządu ani prokurentów." };
+}
+
 /** KRS extract, or NIP resolved through the public VAT whitelist. Never calls CEIDG. */
 export async function resolveCapexRegistry(input: {
   krs?: string;

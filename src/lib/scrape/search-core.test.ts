@@ -224,7 +224,7 @@ test("arXiv atom entries become hits", () => {
 test("adapter posture never claims Scrapy, scrcpy or Crawlee are live", () => {
   for (const id of ["scrapy", "scrcpy", "crawlee"] as const) {
     const posture = adapterPosture(id, {});
-    assert.equal(posture.status, "skipped");
+    assert.equal(posture.status, "not_applicable");
     assert.match(posture.message, /Niedostępny|nie jest uruchamiana|nie działa|Wymaga|serverless/i);
   }
   assert.equal(adapterPosture("firecrawl", {}).status, "skipped");

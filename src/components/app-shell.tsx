@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 const NAV = [
   { to: "/", label: "Szukaj", icon: Search },
-  { to: "/engines", label: "Silniki", icon: Layers },
+  { to: "/engines", label: "Źródła", icon: Layers },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -28,7 +28,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 SPECTRA
               </span>
               <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-fg-subtle">
-                Multi-engine search
+                Wiele źródeł
               </span>
             </span>
           </Link>
@@ -78,10 +78,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <footer className="border-t border-border/60 py-8 text-center text-xs text-fg-subtle">
         <p>
-          SPECTRA szuka w wielu źródłach i scrapuje strony równolegle. Status adaptera mówi, co naprawdę zadziałało.
+          SPECTRA szuka w źródłach danych, a potem sam pobiera strony. Status mówi, co naprawdę zadziałało.
         </p>
         <p className="mt-1 opacity-70">
-          Darmowe źródła działają bez klucza. SerpAPI (SERPAPI_API_KEY) jest głównym discovery; Firecrawl, Brave, Serper, Browser Use i Crawl4AI są opcjonalne.
+          Bez klucza: Wikipedia, Wikidata, GitHub, HN, Stack Overflow, arXiv i — gdy nie zablokuje — DuckDuckGo. SerpAPI, Brave, Serper, Firecrawl i Browser Use są opcjonalne.
         </p>
       </footer>
     </div>

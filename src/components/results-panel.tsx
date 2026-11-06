@@ -15,7 +15,7 @@ import { cn, formatDuration, truncate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarkdownView } from "@/components/markdown-view";
-import { EnginePipeline } from "@/components/engine-pipeline";
+import { CascadePanel, discoveryBadge, ProcessingPanel } from "@/components/engine-pipeline";
 
 export function ResultsPanel({ result }: { result: SpectraResult }) {
   const primary = result.sources[0];
@@ -119,36 +119,30 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="min-w-0 space-y-6">
+          <CascadePanel stages={result.stages} />
           {result.discovery.length > 0 && (
             <section className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
-              <h3 className="mb-3 text-sm font-semibold text-fg">Źródła discovery</h3>
+              <h3 className="mb-1 text-sm font-semibold text-fg">Źródła zapytania</h3>
+              <p className="mb-3 text-xs text-fg-subtle">
+                Działa = źródło odpowiedziało. 0 trafień = pusta odpowiedź, nie awaria. Błąd = źródło
+                nie doszło. Nie dotyczy = ten tryb go nie woła.
+              </p>
               <ul className="grid gap-2 sm:grid-cols-2">
-                {result.discovery.map((run) => (
-                  <li
-                    key={run.id}
-                    className="rounded-[var(--radius-lg)] border border-border/80 bg-bg-elevated px-3 py-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-fg">{run.label}</p>
-                      <Badge
-                        variant={
-                          run.status === "live"
-                            ? "success"
-                            : run.status === "error"
-                              ? "danger"
-                              : "default"
-                        }
-                      >
-                        {run.status === "live"
-                          ? `${run.hits}`
-                          : run.status === "error"
-                            ? "błąd"
-                            : "pominięte"}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">{run.message}</p>
-                  </li>
-                ))}
+                {result.discovery.map((run) => {
+                  const badge = discoveryBadge(run);
+                  return (
+                    <li
+                      key={run.id}
+                      className="rounded-[var(--radius-lg)] border border-border/80 bg-bg-elevated px-3 py-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-fg">{run.label}</p>
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-3 text-xs text-fg-subtle">{run.message}</p>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}
@@ -191,7 +185,7 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-          <EnginePipeline runs={result.engines} />
+          <ProcessingPanel runs={result.engines} />
           <EffectivenessCard result={result} />
           {primary && <SourceStats source={primary} />}
         </aside>

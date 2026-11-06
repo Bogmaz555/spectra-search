@@ -103,6 +103,17 @@ function looksLikeChallenge(html: string): boolean {
   return /captcha|anomaly|unfortunately, bots/i.test(html.slice(0, 4000));
 }
 
+/** Polish reason for a discovery failure. Does not include secrets. */
+export function explainDiscoveryFailure(id: string, label: string, err: unknown): string {
+  const raw = err instanceof Error ? err.message : "Błąd źródła";
+  const short = raw.replace(/\s+/g, " ").trim().slice(0, 160);
+  if (id === "duckduckgo" || id === "duckduckgo-lite") {
+    return `${label} niedostępny (${short}). Z centrum danych DuckDuckGo często zwraca 403 albo stronę blokady. Zostają Wikipedia, GitHub i pozostałe darmowe źródła.`;
+  }
+  if (/^HTTP \d+/.test(short)) return `${label}: ${short}`;
+  return short || "Błąd źródła";
+}
+
 async function getText(
   url: string,
   headers: Record<string, string>,
@@ -427,7 +438,9 @@ export async function runDiscovery(
           status: "live",
           hits: hits.length,
           durationMs: Date.now() - t0,
-          message: hits.length ? `${hits.length} trafień` : "Brak trafień",
+          message: hits.length
+            ? `${hits.length} trafień`
+            : "Odpowiedź bez trafień — źródło działa, nic nie pasowało do zapytania.",
         });
       } catch (err) {
         runs.push({
@@ -436,7 +449,7 @@ export async function runDiscovery(
           status: "error",
           hits: 0,
           durationMs: Date.now() - t0,
-          message: err instanceof Error ? err.message.slice(0, 180) : "Błąd źródła",
+          message: explainDiscoveryFailure(provider.id, provider.label, err),
         });
       }
     }),

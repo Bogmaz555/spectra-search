@@ -285,6 +285,8 @@ export function scoreEffectiveness(input: {
   hits: SearchHit[];
   sources: SourceResult[];
   resolvedMode: string;
+  /** Share of query tokens found in fetched text, 0–1. */
+  coverage?: number;
 }): {
   score: number;
   grade: "A" | "B" | "C" | "D" | "F";
@@ -343,6 +345,16 @@ export function scoreEffectiveness(input: {
 
   const links = okSources.reduce((s, x) => s + x.links.length, 0);
   add("Graf linków", links >= 5, 10, links ? `${links} linków do dalszego crawla` : "Mało linków");
+
+  if (typeof input.coverage === "number" && Number.isFinite(input.coverage)) {
+    const pct = Math.round(Math.max(0, Math.min(1, input.coverage)) * 100);
+    add(
+      "Pokrycie zapytania",
+      pct >= 50,
+      15,
+      `${pct}% tokenów zapytania występuje w pobranej treści`,
+    );
+  }
 
   const score = max ? Math.round((points / max) * 100) : 0;
   const grade: "A" | "B" | "C" | "D" | "F" =

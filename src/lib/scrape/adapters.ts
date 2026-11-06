@@ -3,7 +3,7 @@ import { LIMITS } from "./limits.ts";
 import type { EngineRun, EngineStatus, ExtractedLink, StructuredField } from "./types.ts";
 
 export interface AdapterPosture {
-  status: Extract<EngineStatus, "live" | "degraded" | "skipped">;
+  status: Extract<EngineStatus, "live" | "degraded" | "skipped" | "not_applicable">;
   message: string;
   envKeys: string[];
 }
@@ -20,7 +20,7 @@ export function adapterPosture(id: EngineId, env: Env = process.env): AdapterPos
   const keySet = envKeys.some((key) => envHas(env, key));
 
   if (eng.runtime === "unavailable") {
-    return { status: "skipped", message: eng.runtimeNote, envKeys };
+    return { status: "not_applicable", message: eng.runtimeNote, envKeys };
   }
   if (eng.runtime === "optional") {
     if (!keySet) return { status: "skipped", message: eng.runtimeNote, envKeys };

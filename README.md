@@ -1,35 +1,39 @@
 # SPECTRA — wyszukiwanie wieloźródłowe
 
-Portal wyszukiwania: darmowe źródła discovery, równoległy crawl stron i uczciwe adaptery dla nazwanych silników. Opcjonalnie **Grok (xAI)** syntezuje odpowiedź.
+Portal wyszukiwania: źródła danych, potem własne pobranie stron. Opcjonalnie **Grok (xAI)** syntezuje odpowiedź.
 
-Darmowa ścieżka działa bez płatnych kluczy.
+Darmowa ścieżka działa bez płatnych kluczy. Ekran skanu nie reklamuje dziesięciu bibliotek jako integracji.
+
+Kaskada: odkrywanie → tanie pobranie → płatny fallback tylko dla cienkiej strony → ograniczone zejście → ekstrakcja → pokrycie tokenów i opcjonalny Grok (`grok-4.3`). Szczegóły wdrożeń, których tu nie ma (curl-impersonate, Scrapling, Crawlee, Scrapy, AutoScraper, MarkItDown, scrcpy), są w [`docs/cascade-roadmap.md`](docs/cascade-roadmap.md).
 
 ## Co jest prawdziwe
 
 | Warstwa | Zachowanie |
 | --- | --- |
-| Discovery | DuckDuckGo HTML + Lite, Wikipedia PL/EN/DE, Wikidata, Hacker News, Stack Overflow, arXiv, GitHub |
-| Opcjonalne wyszukiwarki | Brave (`BRAVE_SEARCH_API_KEY`), Serper (`SERPER_API_KEY`) — pomijane bez klucza |
+| Discovery bez klucza | Wikipedia PL/EN/DE, Wikidata, Hacker News, Stack Overflow, arXiv, GitHub. DuckDuckGo HTML i Lite są próbą scrapingu — z Vercel często 403 albo strona blokady; błąd tego źródła nie wyłącza reszty |
+| SerpAPI | Opcjonalne `SERPAPI_API_KEY`. Google (i część newsów CapEx). Limit na skan, żeby nie zjadać darmowego planu. Bez klucza pomijane |
+| Inne wyszukiwarki | Brave (`BRAVE_SEARCH_API_KEY`), Serper (`SERPER_API_KEY`) — pomijane bez klucza |
+| Firma / CapEx | KRS (`api-krs.ms.gov.pl`), ścieżki firmy, Google News RSS, prasa `site:`. Pusta odpowiedź nie jest błędem; awaria transportu jest |
 | Crawl | Własna kolejka: deduplikacja URL, limit hostów, współbieżność, budżet czasu, robots.txt, odrzucanie adresów prywatnych |
-| Ekstrakcja | Cheerio: markdown, meta, linki, media, heurystyka list |
+| Ekstrakcja | Cheerio: markdown, meta, linki, media, heurystyka list. Status **krok lokalny**, nie nazwa cudzej biblioteki |
 | Firecrawl | Prawdziwe `POST /v1/scrape`, tylko z `FIRECRAWL_API_KEY` |
 | Browser Use | `fetch.browser-use.com`, tylko z kluczem i tylko przy blokadzie / pustej stronie |
-| Crawl4AI | Chmura albo self-host `/md`, gdy ustawiony klucz lub `CRAWL4AI_BASE_URL` |
+| Crawl4AI | Chmura albo self-host `/md`, gdy ustawiony klucz lub `CRAWL4AI_BASE_URL`. Inaczej lokalny markdown |
 
-## Czego tu nie ma (i status to mówi)
+## Czego skan nie pokazuje jako działającego
 
-| Adapter | Dlaczego |
+| Nazwa | Dlaczego |
 | --- | --- |
-| curl-impersonate | Brak binarki TLS/JA3. Zostają nagłówki Chrome — status **aproksymacja**. |
-| Scrapling | Biblioteka Pythona nie jest uruchamiana. Jest retry i detekcja blokad — **aproksymacja**. |
-| AutoScraper | Brak uczenia z przykładu. Heurystyka CSS — **aproksymacja**. |
-| MarkItDown | Brak konwersji PDF/Office. Jest normalizacja Markdown — **aproksymacja**. |
-| Crawl4AI bez klucza | Lokalny HTML→Markdown — **aproksymacja**. |
-| Crawlee | Worker Apify / Playwright nie mieści się w funkcji serverless — **pominięty**. Kolejkę robi SPECTRA. |
-| Scrapy | Proces Pythona (Twisted) — **pominięty**. |
-| scrcpy | Wymaga ADB i Androida — **pominięty**. Viewport strony nie jest scrcpy. |
-| Browser Use bez klucza | **Pominięty**. Analiza DOM nie jest Browser Use. |
-| Firecrawl bez klucza | **Pominięty**. Lokalne pola meta nie są Firecrawlem. |
+| curl-impersonate | Brak binarki TLS/JA3. Zostają nagłówki Chrome — krok lokalny „Pobranie HTTP”. |
+| Scrapling | Biblioteka Pythona nie jest uruchamiana. Jest detekcja blokady, a gdy jej nie ma — status „nie dotyczy”. |
+| AutoScraper | Brak uczenia z przykładu. Heurystyka CSS, albo „nie dotyczy”, gdy nie ma listy. |
+| MarkItDown | Brak konwersji PDF/Office. Jest normalizacja Markdown. |
+| Crawl4AI bez klucza | Lokalny HTML→Markdown. |
+| Crawlee | Worker Apify / Playwright nie mieści się w funkcji serverless. Kolejkę robi SPECTRA. Poza ekranem skanu. |
+| Scrapy | Proces Pythona. Poza ekranem skanu. |
+| scrcpy | ADB i Android. Nie ma związku z wyszukiwaniem stron i nie pojawia się w skanie. |
+| Browser Use bez klucza | Pominięte. Analiza DOM nie jest Browser Use. |
+| Firecrawl bez klucza | Pominięte. Lokalne pola meta nie są Firecrawlem. |
 
 ## Stack
 

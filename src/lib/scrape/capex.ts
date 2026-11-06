@@ -577,6 +577,9 @@ export async function searchCapexNews(
   press: RankableHit[];
   investmentQueries: number;
   pressQueries: number;
+  /** Queries whose RSS (and SerpAPI, when it was tried) threw. An empty 200 is not a failure. */
+  investmentFailed: number;
+  pressFailed: number;
   serpapiCalls?: number;
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -589,7 +592,11 @@ export async function searchCapexNews(
   const pressQs = capexSiteQueries(company);
   let serpapiCalls = 0;
   /** Prefer SerpAPI google_news for the first few CapEx queries; RSS for the rest / fallback. */
-  const load = async (query: string, limit: number, preferSerpapi: boolean) => {
+  const load = async (
+    query: string,
+    limit: number,
+    preferSerpapi: boolean,
+  ): Promise<{ hits: RankableHit[]; failed: boolean }> => {
     if (preferSerpapi && useSerpapi && budget && budget.remainingCalls > 0) {
       try {
         const hits = await serpapiSearch({
@@ -603,15 +610,15 @@ export async function searchCapexNews(
           budget,
         });
         serpapiCalls += 1;
-        if (hits.length) return hits;
+        if (hits.length) return { hits, failed: false };
       } catch {
         /* fall through to free RSS */
       }
     }
     try {
-      return await googleNews(query, { fetchImpl, limit });
+      return { hits: await googleNews(query, { fetchImpl, limit }), failed: false };
     } catch {
-      return [] as RankableHit[];
+      return { hits: [], failed: true };
     }
   };
   const [investGroups, pressGroups] = await Promise.all([
@@ -619,11 +626,14 @@ export async function searchCapexNews(
     Promise.all(pressQs.map((site, index) => load(site.query, 3, index < 1))),
   ]);
   const investFused = fuseHits(
-    investGroups.map((hits) => ({ source: "google-news", hits })),
+    investGroups.map((group) => ({ source: "google-news", hits: group.hits })),
     company,
   ).slice(0, 8);
   const pressFused = fuseHits(
-    pressGroups.map((hits, index) => ({ source: `press:${pressQs[index]?.host ?? index}`, hits })),
+    pressGroups.map((group, index) => ({
+      source: `press:${pressQs[index]?.host ?? index}`,
+      hits: group.hits,
+    })),
     company,
   ).slice(0, 6);
   const [investment, press] = await Promise.all([
@@ -635,6 +645,8 @@ export async function searchCapexNews(
     press,
     investmentQueries: investQs.length,
     pressQueries: pressQs.length,
+    investmentFailed: investGroups.filter((group) => group.failed).length,
+    pressFailed: pressGroups.filter((group) => group.failed).length,
     serpapiCalls,
   };
 }

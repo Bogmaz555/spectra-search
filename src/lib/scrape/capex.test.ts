@@ -269,4 +269,6 @@ test("press site templates are actually requested", async () => {
   assert.ok(decoded.some((url) => url.includes("site:opakowanie.com.pl Firma X")));
   assert.equal(news.investment.length, 0);
   assert.equal(news.press.length, 0);
+  assert.equal(news.investmentFailed, 0);
+  assert.equal(news.pressFailed, 0);
 });

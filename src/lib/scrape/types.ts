@@ -2,13 +2,22 @@ import type { EngineId } from "../engines.ts";
 
 export type SearchMode = "auto" | "search" | "url" | "deep" | "capex";
 
-/** Honest adapter outcome. `live` means the named integration actually ran. */
+/**
+ * Honest outcome.
+ * `live` — the named integration actually ran.
+ * `local` — SPECTRA's own step ran; it is not that third-party project.
+ * `not_applicable` — this step or source does not apply to the scan.
+ * `skipped` — it could run, but this scan did not call it (no key, robots, limit).
+ * `error` — it was called and failed.
+ */
 export type EngineStatus =
   | "pending"
   | "running"
   | "live"
+  | "local"
   | "degraded"
   | "skipped"
+  | "not_applicable"
   | "error";
 
 export interface EngineRun {
@@ -92,7 +101,7 @@ export interface SearchHit {
 export interface DiscoveryRun {
   id: string;
   label: string;
-  status: "live" | "skipped" | "error";
+  status: "live" | "skipped" | "error" | "not_applicable";
   hits: number;
   durationMs: number;
   message: string;
@@ -117,6 +126,19 @@ export interface EffectivenessReport {
   factors: { label: string; ok: boolean; detail: string }[];
 }
 
+/** One step of the research cascade. Status names only what actually ran. */
+export interface ResearchStage {
+  id: "discovery" | "fetch" | "fallback" | "deep" | "extract" | "verify";
+  label: string;
+  status: "live" | "local" | "skipped" | "not_applicable" | "error";
+  input: string;
+  output: string;
+  contribution: string;
+  /** Why the stage did not run, when status is skipped or not_applicable. */
+  reason?: string;
+  provenance: string;
+}
+
 export interface SpectraResult {
   query: string;
   mode: SearchMode;
@@ -124,6 +146,8 @@ export interface SpectraResult {
   hits: SearchHit[];
   sources: SourceResult[];
   engines: EngineRun[];
+  /** Ordered cascade. Length is always the six research stages. */
+  stages: ResearchStage[];
   discovery: DiscoveryRun[];
   summary: string;
   totalDurationMs: number;

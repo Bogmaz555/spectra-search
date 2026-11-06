@@ -19,7 +19,7 @@ import { readCapexDeepLink } from "@/lib/scrape/capex-link";
 import type { SearchMode, SpectraResult } from "@/lib/scrape/types";
 import { cn, formatDuration } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
-import { EngineChip, EnginePipeline } from "@/components/engine-pipeline";
+import { EngineChip, IdleSourceGuide } from "@/components/engine-pipeline";
 import { ResultsPanel } from "@/components/results-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -322,9 +322,9 @@ function HomePage() {
                 onClick={() => setShowEngines((v) => !v)}
                 className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-fg-muted hover:bg-surface-2 hover:text-fg"
               >
-                Silniki
+                Kroki
                 <Badge variant="default" className="px-1.5 py-0">
-                  {engines.length}/10
+                  {engines.length}
                 </Badge>
               </button>
             </div>
@@ -372,11 +372,13 @@ function HomePage() {
       </section>
 
       {loading && (
-        <div className="mx-auto mb-8 max-w-3xl animate-rise">
-          <EnginePipeline simulating activeIds={engines} />
-          <p className="mt-4 text-center text-sm text-fg-muted">
-            Discovery · crawl · ekstrakcja
-            {useAi && aiAvailable ? " · synteza Grok…" : "…"}
+        <div className="mx-auto mb-8 max-w-3xl animate-rise rounded-[var(--radius-xl)] border border-border bg-surface/60 px-4 py-6 text-center">
+          <p className="text-sm text-fg-muted">
+            Źródła zapytania, potem pobranie stron
+            {useAi && aiAvailable ? " i synteza Grok…" : "…"}
+          </p>
+          <p className="mt-2 text-xs text-fg-subtle">
+            DuckDuckGo bywa zablokowany. Wikipedia, GitHub i pozostałe darmowe API lecą niezależnie.
           </p>
         </div>
       )}
@@ -416,7 +418,7 @@ function HomePage() {
 
       {!result && !loading && (
         <div className="mx-auto mt-4 grid max-w-5xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-          <EnginePipeline activeIds={engines} />
+          <IdleSourceGuide />
 
           <div className="space-y-4">
             <HowToSearchCard aiAvailable={aiAvailable} aiNote={aiStatus?.note ?? null} />
@@ -476,8 +478,9 @@ function HowToSearchCard({
       </div>
       <ol className="space-y-2.5 text-sm text-fg-muted">
         <li>
-          <span className="font-medium text-fg">1. Zapytanie</span> — Wikipedia (PL/EN/DE),
-          Wikidata, DuckDuckGo, GitHub, HN, Stack Overflow i arXiv. Potem równoległy scrape.
+          <span className="font-medium text-fg">1. Zapytanie</span> — SerpAPI, gdy jest klucz;
+          bez klucza Wikipedia (PL/EN/DE), Wikidata, GitHub, HN, Stack Overflow, arXiv i DuckDuckGo
+          (HTML bywa blokowany). Potem pobranie znalezionych stron.
         </li>
         <li>
           <span className="font-medium text-fg">2. URL</span> — wklej adres; pełny pipeline na
