@@ -321,6 +321,50 @@ export function clearRobotsCache(): void {
   robotsCache.clear();
 }
 
+/**
+ * GET with manual redirects. Each hop, including a URL the client reports as
+ * `response.url`, must be public HTTP. A private target is never requested.
+ */
+export async function publicFetch(
+  url: string,
+  opts: {
+    fetchImpl?: typeof fetch;
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    lookup?: DnsLookup;
+  } = {},
+): Promise<{ response: Response; finalUrl: string }> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const lookup = opts.lookup ?? defaultDnsLookup;
+  const timeoutMs = opts.timeoutMs ?? LIMITS.discoveryTimeoutMs;
+  let current = url;
+  for (let hop = 0; hop <= LIMITS.maxRedirects; hop++) {
+    if (!(await isPublicHttpUrlResolved(current, lookup))) {
+      throw new Error("URL odrzucony (adres prywatny, lokalny albo nie-HTTP)");
+    }
+    const response = await fetchImpl(current, {
+      redirect: "manual",
+      signal: opts.signal ?? AbortSignal.timeout(timeoutMs),
+      headers: opts.headers,
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const loc = response.headers.get("location");
+      await response.body?.cancel().catch(() => undefined);
+      if (!loc) return { response, finalUrl: current };
+      current = new URL(loc, current).href;
+      continue;
+    }
+    const reported = response.url?.startsWith("http") ? response.url : current;
+    if (reported !== current && !(await isPublicHttpUrlResolved(reported, lookup))) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error("URL odrzucony (adres prywatny, lokalny albo nie-HTTP)");
+    }
+    return { response, finalUrl: reported };
+  }
+  throw new Error("Za dużo przekierowań");
+}
+
 /** True when robots.txt does not forbid the URL. Unreadable robots.txt fails open. */
 export async function allowedByRobots(
   url: string,

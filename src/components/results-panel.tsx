@@ -1,5 +1,6 @@
 import {
   CheckCircle2,
+  Circle,
   ExternalLink,
   FileJson,
   Globe,
@@ -15,16 +16,11 @@ import { cn, formatDuration, truncate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarkdownView } from "@/components/markdown-view";
-import { EnginePipeline } from "@/components/engine-pipeline";
+import { CascadePanel, discoveryBadge, ProcessingPanel } from "@/components/engine-pipeline";
 
 export function ResultsPanel({ result }: { result: SpectraResult }) {
   const primary = result.sources[0];
-  const gradeColor =
-    result.effectiveness.grade === "A" || result.effectiveness.grade === "B"
-      ? "text-success"
-      : result.effectiveness.grade === "C"
-        ? "text-warn"
-        : "text-danger";
+  const gradeColor = "text-fg";
 
   return (
     <div className="animate-rise space-y-6">
@@ -36,7 +32,9 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
               <Sparkles className="h-3 w-3" />
               Grok · {result.ai.model}
             </Badge>
-            <Badge variant="default">pewność {(result.ai.confidence * 100).toFixed(0)}%</Badge>
+            <Badge variant="default">
+              samoocena modelu {(result.ai.confidence * 100).toFixed(0)}% — nie weryfikacja
+            </Badge>
           </div>
           <h2 className="font-display text-lg font-semibold tracking-tight text-fg sm:text-xl">
             Odpowiedź z syntezy źródeł
@@ -106,12 +104,15 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
             </p>
           </div>
           <div className="rounded-[var(--radius-lg)] border border-border bg-bg-elevated px-4 py-3 text-center">
-            <p className="text-[10px] uppercase tracking-wider text-fg-subtle">Skuteczność</p>
+            <p className="text-[10px] uppercase tracking-wider text-fg-subtle">Zebranie</p>
             <p className={cn("font-display text-3xl font-semibold tabular-nums", gradeColor)}>
               {result.effectiveness.score}
             </p>
             <p className={cn("text-xs font-medium", gradeColor)}>
-              ocena {result.effectiveness.grade}
+              ocena zbioru {result.effectiveness.grade}
+            </p>
+            <p className="mt-2 max-w-[14rem] text-left text-[10px] leading-relaxed text-fg-subtle">
+              {result.effectiveness.disclaimer}
             </p>
           </div>
         </div>
@@ -119,36 +120,30 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="min-w-0 space-y-6">
+          <CascadePanel stages={result.stages} />
           {result.discovery.length > 0 && (
             <section className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4 sm:p-5">
-              <h3 className="mb-3 text-sm font-semibold text-fg">Źródła discovery</h3>
+              <h3 className="mb-1 text-sm font-semibold text-fg">Źródła zapytania</h3>
+              <p className="mb-3 text-xs text-fg-subtle">
+                Działa = źródło odpowiedziało. 0 trafień = pusta odpowiedź, nie awaria. Błąd = źródło
+                nie doszło. Nie dotyczy = ten tryb go nie woła.
+              </p>
               <ul className="grid gap-2 sm:grid-cols-2">
-                {result.discovery.map((run) => (
-                  <li
-                    key={run.id}
-                    className="rounded-[var(--radius-lg)] border border-border/80 bg-bg-elevated px-3 py-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-fg">{run.label}</p>
-                      <Badge
-                        variant={
-                          run.status === "live"
-                            ? "success"
-                            : run.status === "error"
-                              ? "danger"
-                              : "default"
-                        }
-                      >
-                        {run.status === "live"
-                          ? `${run.hits}`
-                          : run.status === "error"
-                            ? "błąd"
-                            : "pominięte"}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">{run.message}</p>
-                  </li>
-                ))}
+                {result.discovery.map((run) => {
+                  const badge = discoveryBadge(run);
+                  return (
+                    <li
+                      key={run.id}
+                      className="rounded-[var(--radius-lg)] border border-border/80 bg-bg-elevated px-3 py-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-fg">{run.label}</p>
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
+                      </div>
+                      <p className="mt-1 line-clamp-3 text-xs text-fg-subtle">{run.message}</p>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}
@@ -191,7 +186,7 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-          <EnginePipeline runs={result.engines} />
+          <ProcessingPanel runs={result.engines} />
           <EffectivenessCard result={result} />
           {primary && <SourceStats source={primary} />}
         </aside>
@@ -203,11 +198,14 @@ export function ResultsPanel({ result }: { result: SpectraResult }) {
 function EffectivenessCard({ result }: { result: SpectraResult }) {
   return (
     <div className="rounded-[var(--radius-xl)] border border-border bg-surface/60 p-4">
-      <h3 className="mb-3 text-sm font-semibold text-fg">Raport skuteczności</h3>
+      <h3 className="mb-1 text-sm font-semibold text-fg">Zebranie materiału</h3>
+      <p className="mb-3 text-xs leading-relaxed text-fg-subtle">{result.effectiveness.disclaimer}</p>
       <ul className="space-y-2">
         {result.effectiveness.factors.map((f) => (
           <li key={f.label} className="flex items-start gap-2 text-xs">
-            {f.ok ? (
+            {f.kind === "note" ? (
+              <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
+            ) : f.ok ? (
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
             ) : (
               <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
@@ -394,7 +392,9 @@ function SourceCard({ source, index }: { source: SourceResult; index: number }) 
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-fg">{p.label}</p>
-                      <Badge variant="default">{(p.confidence * 100).toFixed(0)}% conf.</Badge>
+                      <Badge variant="default">
+                        heurystyka listy {(p.confidence * 100).toFixed(0)}%
+                      </Badge>
                     </div>
                     <ul className="space-y-1">
                       {p.items.map((item) => (

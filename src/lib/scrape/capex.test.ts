@@ -194,7 +194,10 @@ test("probeCompanyPaths queues only the paths that return 200", async () => {
     }
     return new Response("ok", { status: 200 });
   };
-  const queued = await probeCompanyPaths("https://firma.pl", { fetchImpl });
+  const queued = await probeCompanyPaths("https://firma.pl", {
+    fetchImpl,
+    lookup: async () => ["93.184.216.34"],
+  });
   assert.ok(queued.includes("https://firma.pl/aktualnosci"));
   assert.ok(queued.includes("https://firma.pl/o-nas"));
   assert.equal(queued.includes("https://firma.pl/kontakt"), false);
@@ -269,4 +272,6 @@ test("press site templates are actually requested", async () => {
   assert.ok(decoded.some((url) => url.includes("site:opakowanie.com.pl Firma X")));
   assert.equal(news.investment.length, 0);
   assert.equal(news.press.length, 0);
+  assert.equal(news.investmentFailed, 0);
+  assert.equal(news.pressFailed, 0);
 });

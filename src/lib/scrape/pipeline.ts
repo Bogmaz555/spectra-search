@@ -1,4 +1,4 @@
-import { ENGINES, type EngineId } from "../engines.ts";
+import { DEFAULT_ENGINE_IDS, ENGINES, type EngineId } from "../engines.ts";
 import { isUrl, normalizeUrl } from "../utils.ts";
 import { getXaiStatus, scoreEffectiveness, synthesizeWithGrok } from "../xai.ts";
 import {
@@ -33,10 +33,13 @@ import {
 } from "./capex.ts";
 import {
   extractRegistryIds,
+  krsDiscoveryStatus,
   krsSourceResult,
   resolveCapexRegistry,
   type KrsRegistry,
 } from "./krs.ts";
+import { emptySourceMessage, hitOutcome } from "./outcome.ts";
+import { buildResearchStages, citationOverlap, countWords, queryCoverage } from "./cascade.ts";
 import {
   extractDocument,
   htmlToMarkdown,
@@ -78,6 +81,20 @@ function hostnamePath(raw: string): string {
 
 type Env = Record<string, string | undefined>;
 
+interface ScrapeStats {
+  cheapOk: number;
+  cheapFail: number;
+  cheapSkipped: number;
+  thinPages: number;
+  firecrawlCalls: number;
+  firecrawlOk: number;
+  browserCalls: number;
+  browserOk: number;
+  crawl4aiCalls: number;
+  crawl4aiOk: number;
+  followed: number;
+}
+
 interface ScrapeCtx {
   enabled: Set<EngineId>;
   env: Env;
@@ -85,6 +102,7 @@ interface ScrapeCtx {
   deadline: number;
   sessionId: string;
   remote: { firecrawl: number; browser: number; crawl4ai: number };
+  stats: ScrapeStats;
 }
 
 function emptyMobile(): MobileInsight {
@@ -131,12 +149,14 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
   const url = canonicalUrl(rawUrl) ?? rawUrl;
 
   if (timeLeft(ctx) < 2_000) {
+    ctx.stats.cheapFail += 1;
     runs.push(
       mkRun("curl-impersonate", "error", 0, "Budżet czasu funkcji wyczerpany — strona pominięta"),
     );
     return { ...blankSource(url, runs, "Pominięto", "Budżet czasu"), fetchedAt: started };
   }
   if (!(await isPublicHttpUrlResolved(url))) {
+    ctx.stats.cheapFail += 1;
     runs.push(
       mkRun(
         "curl-impersonate",
@@ -151,6 +171,7 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
     };
   }
   if (!(await allowedByRobots(url, ctx.fetchImpl))) {
+    ctx.stats.cheapSkipped += 1;
     if (on(ctx, "curl-impersonate")) {
       runs.push(mkRun("curl-impersonate", "skipped", 0, "robots.txt zabrania tej ścieżki"));
     }
@@ -182,83 +203,29 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
   let firecrawlLinkList: string[] = [];
   let fromFirecrawl = false;
 
-  const firecrawlKey = ctx.env.FIRECRAWL_API_KEY?.trim();
-  if (on(ctx, "firecrawl")) {
-    if (!firecrawlKey) {
-      runs.push(mkRun("firecrawl", "skipped", 0, adapterPosture("firecrawl", ctx.env).message));
-    } else if (!isPublicHttpUrl(url)) {
-      runs.push(mkRun("firecrawl", "skipped", 0, "URL odrzucony przed wywołaniem Firecrawl"));
-    } else if (ctx.remote.firecrawl <= 0) {
-      runs.push(
-        mkRun(
-          "firecrawl",
-          "skipped",
-          0,
-          "Limit wywołań Firecrawl na to zapytanie został wyczerpany",
-        ),
-      );
-    } else if (timeLeft(ctx) < 3_000) {
-      runs.push(mkRun("firecrawl", "skipped", 0, "Za mało czasu na Firecrawl"));
-    } else {
-      ctx.remote.firecrawl -= 1;
-      const t0 = Date.now();
-      const page = await callFirecrawl(url, {
-        apiKey: firecrawlKey,
-        fetchImpl: ctx.fetchImpl,
-        timeoutMs: Math.min(LIMITS.firecrawlTimeoutMs, timeLeft(ctx) - 500),
-      });
-      if ("error" in page) {
-        runs.push(mkRun("firecrawl", "error", Date.now() - t0, page.error));
-      } else {
-        fromFirecrawl = true;
-        html = page.html;
-        markdown = page.markdown;
-        title = page.title;
-        description = page.description;
-        finalUrl = canonicalUrl(page.sourceUrl) ?? url;
-        statusCode = page.statusCode || 200;
-        contentType = html ? "text/html" : "text/markdown";
-        firecrawlFields = page.fields;
-        firecrawlLinkList = page.links;
-        runs.push(
-          mkRun(
-            "firecrawl",
-            "live",
-            Date.now() - t0,
-            `Firecrawl /v1/scrape · ${page.fields.length} pól · ${page.links.length} linków`,
-            page.fields.length,
-          ),
-        );
-      }
-    }
-  }
-
-  let fetched: HttpResult | null = null;
-  if (!fromFirecrawl) {
-    fetched = await resilientGet(url, {
-      fetchImpl: ctx.fetchImpl,
-      timeoutMs: Math.min(LIMITS.fetchTimeoutMs, Math.max(2_000, timeLeft(ctx) - 500)),
-      respectRobots: true,
-    });
-    finalUrl = canonicalUrl(fetched.url) ?? fetched.url;
-    statusCode = fetched.statusCode;
-    contentType = fetched.contentType;
-    html = fetched.body;
-  }
+  const fetched: HttpResult = await resilientGet(url, {
+    fetchImpl: ctx.fetchImpl,
+    timeoutMs: Math.min(LIMITS.fetchTimeoutMs, Math.max(2_000, timeLeft(ctx) - 500)),
+    respectRobots: true,
+  });
+  finalUrl = canonicalUrl(fetched.url) ?? fetched.url;
+  statusCode = fetched.statusCode;
+  contentType = fetched.contentType;
+  html = fetched.body;
+  const cheapThin =
+    !fetched.robotsBlocked &&
+    (fetched.blocked || !fetched.ok || visibleTextLength(html) < 80);
+  if (fetched.robotsBlocked) ctx.stats.cheapSkipped += 1;
+  else if (!fetched.ok || fetched.blocked) {
+    ctx.stats.cheapFail += 1;
+    ctx.stats.thinPages += 1;
+  } else if (cheapThin) {
+    ctx.stats.cheapOk += 1;
+    ctx.stats.thinPages += 1;
+  } else ctx.stats.cheapOk += 1;
 
   if (on(ctx, "curl-impersonate")) {
-    if (fromFirecrawl) {
-      runs.push(
-        mkRun(
-          "curl-impersonate",
-          "skipped",
-          0,
-          "Pobranie wykonał Firecrawl — lokalny fetch nie był wołany",
-        ),
-      );
-    } else if (!fetched) {
-      runs.push(mkRun("curl-impersonate", "skipped", 0, "Fetch wyłączony"));
-    } else if (fetched.robotsBlocked) {
+    if (fetched.robotsBlocked) {
       runs.push(
         mkRun("curl-impersonate", "skipped", fetched.durationMs, fetched.error || "robots.txt"),
       );
@@ -266,7 +233,7 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       runs.push(
         mkRun(
           "curl-impersonate",
-          "degraded",
+          "local",
           fetched.durationMs,
           `HTTP ${fetched.statusCode} · ${Math.max(1, Math.round(fetched.body.length / 1024))} KB · nagłówki Chrome, bez TLS/JA3 curl-impersonate`,
           1,
@@ -285,26 +252,17 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
   }
 
   if (on(ctx, "scrapling")) {
-    if (fromFirecrawl) {
-      runs.push(
-        mkRun(
-          "scrapling",
-          "skipped",
-          0,
-          "Stronę pobrał Firecrawl — lokalny retry nie był potrzebny",
-        ),
-      );
-    } else if (!fetched) {
-      runs.push(mkRun("scrapling", "skipped", 0, "Brak odpowiedzi do oceny"));
-    } else if (fetched.robotsBlocked) {
+    if (fetched.robotsBlocked) {
       runs.push(mkRun("scrapling", "skipped", 0, "robots.txt — bez obchodzenia zakazu"));
-    } else if (fetched.attempts > 1) {
+    } else if (fetched.blocked || fetched.attempts > 1) {
       runs.push(
         mkRun(
           "scrapling",
-          "degraded",
+          "local",
           fetched.durationMs,
-          `Retry (${fetched.attempts} próby)${fetched.blocked ? " · nadal wygląda na blokadę" : ""}. To nie jest biblioteka Scrapling.`,
+          fetched.blocked
+            ? `Wykryto blokadę po ${fetched.attempts} próbach. To lokalna heurystyka, nie biblioteka Scrapling.`
+            : `Powtórzono pobranie (${fetched.attempts} próby) bez śladu blokady. To nie jest Scrapling.`,
           fetched.attempts,
         ),
       );
@@ -312,60 +270,117 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       runs.push(
         mkRun(
           "scrapling",
-          "degraded",
-          1,
-          fetched.blocked
-            ? "Wykryto blokadę (CAPTCHA/403/429). Lokalna heurystyka, nie Scrapling."
-            : "Brak śladów blokady. Detekcja lokalna, nie biblioteka Scrapling.",
+          "not_applicable",
+          fetched.durationMs,
+          "Nie dotyczy — jedna odpowiedź, bez śladu blokady. Biblioteka Scrapling nie jest uruchomiona.",
         ),
       );
     }
   }
 
-  const thin =
-    !fromFirecrawl &&
-    !!fetched &&
-    !fetched.robotsBlocked &&
-    (fetched.blocked || !fetched.ok || visibleTextLength(html) < 280);
+  const rich = () => countWords(markdown) >= 40 || visibleTextLength(html) >= 280;
+  const firecrawlKey = ctx.env.FIRECRAWL_API_KEY?.trim();
+  if (on(ctx, "firecrawl")) {
+    if (fetched.robotsBlocked) {
+      runs.push(mkRun("firecrawl", "skipped", 0, "robots.txt — Firecrawl nie omija zakazu"));
+    } else if (!cheapThin) {
+      runs.push(
+        mkRun("firecrawl", "skipped", 0, "Tanie pobranie wystarczyło — Firecrawl nie był wołany."),
+      );
+    } else if (!firecrawlKey) {
+      runs.push(
+        mkRun(
+          "firecrawl",
+          "skipped",
+          0,
+          "Strona cienka albo zablokowana, ale brak FIRECRAWL_API_KEY — płatny fallback pominięty.",
+        ),
+      );
+    } else if (!isPublicHttpUrl(url) || ctx.remote.firecrawl <= 0 || timeLeft(ctx) < 3_000) {
+      runs.push(
+        mkRun("firecrawl", "skipped", 0, "Za mało czasu albo limit Firecrawl na to zapytanie."),
+      );
+    } else {
+      ctx.remote.firecrawl -= 1;
+      ctx.stats.firecrawlCalls += 1;
+      const t0 = Date.now();
+      const page = await callFirecrawl(url, {
+        apiKey: firecrawlKey,
+        fetchImpl: ctx.fetchImpl,
+        timeoutMs: Math.min(LIMITS.firecrawlTimeoutMs, timeLeft(ctx) - 500),
+      });
+      if ("error" in page) {
+        runs.push(mkRun("firecrawl", "error", Date.now() - t0, page.error));
+      } else {
+        const returned = canonicalUrl(page.sourceUrl) ?? finalUrl;
+        if (!(await isPublicHttpUrlResolved(returned))) {
+          runs.push(
+            mkRun(
+              "firecrawl",
+              "error",
+              Date.now() - t0,
+              "Firecrawl wskazał adres prywatny albo lokalny — treść odrzucona",
+            ),
+          );
+        } else {
+        fromFirecrawl = true;
+        ctx.stats.firecrawlOk += 1;
+        if (page.html) html = page.html;
+        if (page.markdown) markdown = page.markdown;
+        title = page.title || title;
+        description = page.description || description;
+        finalUrl = returned;
+        statusCode = page.statusCode || statusCode || 200;
+        if (page.html) contentType = "text/html";
+        else if (page.markdown) contentType = "text/markdown";
+        firecrawlFields = page.fields;
+        firecrawlLinkList = page.links;
+        runs.push(
+          mkRun(
+            "firecrawl",
+            "live",
+            Date.now() - t0,
+            `Fallback Firecrawl /v1/scrape · ${page.fields.length} pól · ${page.links.length} linków`,
+            page.fields.length,
+          ),
+        );
+        }
+      }
+    }
+  }
+
+  const stillThin = cheapThin && !fetched.robotsBlocked && !rich();
   const browserKey = ctx.env.BROWSER_USE_API_KEY?.trim();
   if (on(ctx, "browser-use")) {
-    if (!browserKey) {
-      runs.push(mkRun("browser-use", "skipped", 0, adapterPosture("browser-use", ctx.env).message));
-    } else if (fromFirecrawl) {
+    if (fetched.robotsBlocked) {
       runs.push(
-        mkRun("browser-use", "skipped", 0, "Firecrawl zwrócił treść — Browser Use nie był wołany"),
+        mkRun("browser-use", "skipped", 0, "robots.txt zabrania ścieżki — Browser Use jej nie omija"),
       );
-    } else if (fetched?.robotsBlocked) {
+    } else if (!cheapThin || !stillThin) {
       runs.push(
         mkRun(
           "browser-use",
           "skipped",
           0,
-          "robots.txt zabrania ścieżki — Browser Use jej nie omija",
+          fromFirecrawl
+            ? "Firecrawl uzupełnił treść — Browser Use nie był wołany."
+            : "Tanie pobranie wystarczyło — Browser Use nie był wołany.",
         ),
       );
-    } else if (!thin) {
+    } else if (!browserKey) {
       runs.push(
         mkRun(
           "browser-use",
           "skipped",
           0,
-          "Klucz jest ustawiony. Lokalny fetch wystarczył — Browser Use wołany tylko przy blokadzie albo pustej stronie.",
+          "Strona nadal cienka, ale brak BROWSER_USE_API_KEY — fallback pominięty.",
         ),
       );
-    } else if (ctx.remote.browser <= 0) {
-      runs.push(
-        mkRun(
-          "browser-use",
-          "skipped",
-          0,
-          "Limit Browser Use na to zapytanie (2) został wyczerpany",
-        ),
-      );
-    } else if (timeLeft(ctx) < 3_000) {
-      runs.push(mkRun("browser-use", "skipped", 0, "Za mało czasu na Browser Use"));
+    } else if (ctx.remote.browser <= 0 || timeLeft(ctx) < 3_000) {
+      runs.push(mkRun("browser-use", "skipped", 0, "Za mało czasu albo limit Browser Use na to zapytanie."));
     } else {
       ctx.remote.browser -= 1;
+      ctx.stats.browserCalls += 1;
       const t0 = Date.now();
       const page = await callBrowserUse(url, {
         apiKey: browserKey,
@@ -377,20 +392,33 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       if ("error" in page) {
         runs.push(mkRun("browser-use", "error", Date.now() - t0, page.error));
       } else {
+        const returned = canonicalUrl(page.finalUrl) ?? url;
+        if (!(await isPublicHttpUrlResolved(returned))) {
+          runs.push(
+            mkRun(
+              "browser-use",
+              "error",
+              Date.now() - t0,
+              "Browser Use wskazał adres prywatny albo lokalny — treść odrzucona",
+            ),
+          );
+        } else {
+        ctx.stats.browserOk += 1;
         html = page.body;
-        finalUrl = canonicalUrl(page.finalUrl) ?? page.finalUrl;
+        markdown = "";
+        finalUrl = returned;
         statusCode = page.statusCode || statusCode;
         contentType = page.contentType || "text/html";
-        markdown = "";
         runs.push(
           mkRun(
             "browser-use",
             "live",
             Date.now() - t0,
-            `fetch.browser-use.com · HTTP ${page.statusCode || "—"} · uproszczony HTML`,
+            `Fallback fetch.browser-use.com · HTTP ${page.statusCode || "—"} · uproszczony HTML`,
             1,
           ),
         );
+        }
       }
     }
   }
@@ -407,14 +435,26 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
     links = firecrawlLinks(firecrawlLinkList, finalUrl);
   if (!links.length && markdown) links = linksFromMarkdown(markdown, finalUrl);
 
+  if (!markdown && html) markdown = htmlToMarkdown(html, finalUrl);
   const crawlRemote = envHas(ctx.env, "CRAWL4AI_API_KEY") || envHas(ctx.env, "CRAWL4AI_BASE_URL");
+  const needRemoteMarkdown =
+    !fetched.robotsBlocked && cheapThin && countWords(markdown) < 40 && !fromFirecrawl;
   if (on(ctx, "crawl4ai")) {
-    if (fromFirecrawl && markdown) {
+    if (!html && !markdown) {
+      runs.push(mkRun("crawl4ai", "skipped", 0, "Brak HTML do konwersji"));
+    } else if (!needRemoteMarkdown) {
       runs.push(
-        mkRun("crawl4ai", "skipped", 0, "Markdown dostarczył Firecrawl — Crawl4AI nie był wołany"),
+        mkRun(
+          "crawl4ai",
+          "local",
+          1,
+          `Lokalny HTML→Markdown (${countWords(markdown)} słów) wystarcza. Crawl4AI nie był wołany.`,
+          markdown.length,
+        ),
       );
     } else if (crawlRemote && ctx.remote.crawl4ai > 0 && timeLeft(ctx) > 3_000) {
       ctx.remote.crawl4ai -= 1;
+      ctx.stats.crawl4aiCalls += 1;
       const t0 = Date.now();
       const page = await callCrawl4ai(url, {
         env: ctx.env,
@@ -422,7 +462,6 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
         timeoutMs: Math.min(LIMITS.crawl4aiTimeoutMs, timeLeft(ctx) - 500),
       });
       if ("error" in page) {
-        if (!markdown && html) markdown = htmlToMarkdown(html, finalUrl);
         runs.push(
           mkRun(
             "crawl4ai",
@@ -432,33 +471,29 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
           ),
         );
       } else {
+        ctx.stats.crawl4aiOk += 1;
         markdown = page.markdown;
         runs.push(
           mkRun(
             "crawl4ai",
             "live",
             Date.now() - t0,
-            `Prawdziwy Crawl4AI · ${page.markdown.length.toLocaleString("pl-PL")} znaków`,
+            `Fallback Crawl4AI · ${page.markdown.length.toLocaleString("pl-PL")} znaków`,
             page.markdown.length,
           ),
         );
       }
-    } else if (!html && !markdown) {
-      runs.push(mkRun("crawl4ai", "skipped", 0, "Brak HTML do konwersji"));
     } else {
-      if (!markdown && html) markdown = htmlToMarkdown(html, finalUrl);
       runs.push(
         mkRun(
           "crawl4ai",
-          "degraded",
+          "local",
           1,
-          `Lokalny HTML→Markdown (${markdown.length.toLocaleString("pl-PL")} znaków). ${adapterPosture("crawl4ai", ctx.env).message}`,
+          `Krótki lokalny markdown (${countWords(markdown)} słów). ${crawlRemote ? "Brak budżetu na Crawl4AI." : "To nie jest Crawl4AI — brak klucza i adresu instancji."}`,
           markdown.length,
         ),
       );
     }
-  } else if (!markdown && html) {
-    markdown = htmlToMarkdown(html, finalUrl);
   }
 
   if (on(ctx, "markitdown")) {
@@ -467,9 +502,9 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       runs.push(
         mkRun(
           "markitdown",
-          "skipped",
+          "not_applicable",
           0,
-          `Typ ${contentType || "binarny"} — MarkItDown (Python) nie skonwertuje PDF/Office na serverless`,
+          `Nie dotyczy — typ ${contentType || "binarny"}. PDF i Office nie są konwertowane (to nie jest Microsoft MarkItDown).`,
         ),
       );
     } else if (markdown) {
@@ -478,7 +513,7 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       runs.push(
         mkRun(
           "markitdown",
-          "degraded",
+          "local",
           1,
           `Znormalizowano Markdown (${words} słów). To nie jest Microsoft MarkItDown.`,
           words,
@@ -495,11 +530,11 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
     runs.push(
       mkRun(
         "autoscraper",
-        "degraded",
+        patterns.length ? "local" : "not_applicable",
         1,
         patterns.length
           ? `Heurystyka CSS: ${patterns.length} wzorców (${total} elementów). To nie jest AutoScraper.`
-          : "Heurystyka CSS nie znalazła powtarzalnych list. AutoScraper (Python) nie jest uruchomiony.",
+          : "Nie dotyczy — brak powtarzalnej listy. AutoScraper (Python) nie jest uruchomiony.",
         total,
       ),
     );
@@ -579,35 +614,56 @@ function buildSummary(
   return lines.join("\n\n");
 }
 
-export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
+export interface SpectraHooks {
+  /** Test/runtime override. The public server function never forwards client input here. */
+  env?: Env;
+  fetchImpl?: typeof fetch;
+}
+
+export async function runSpectra(
+  req: SpectraRequest,
+  hooks: SpectraHooks = {},
+): Promise<SpectraResult> {
   const query = req.query.trim();
   if (!query) throw new Error("Podaj zapytanie lub URL");
 
   const mode: SearchMode = req.mode ?? "auto";
   const resolved = resolveMode(query, mode);
-  const enabled = new Set<EngineId>(
-    req.engines?.length ? req.engines : ENGINES.map((engine) => engine.id),
-  );
+  const requested = req.engines?.length ? req.engines : DEFAULT_ENGINE_IDS;
+  const enabled = new Set<EngineId>(requested);
   const pageBudget = clampPages(
     req.maxPages,
     resolved === "deep" ? LIMITS.defaultMaxPagesDeep : LIMITS.defaultMaxPagesSearch,
   );
   const targetPages = resolved === "url" ? 1 : pageBudget;
   const useAi = req.useAi !== false;
-  const env = process.env;
+  const env = hooks.env ?? process.env;
   const t0 = Date.now();
   const startedAt = new Date().toISOString();
   const deadline = t0 + LIMITS.searchBudgetMs;
   const ctx: ScrapeCtx = {
     enabled,
     env,
-    fetchImpl: fetch,
+    fetchImpl: hooks.fetchImpl ?? fetch,
     deadline,
     sessionId: crypto.randomUUID(),
     remote: {
       firecrawl: LIMITS.firecrawlCap,
       browser: LIMITS.browserUseCap,
       crawl4ai: LIMITS.crawl4aiCap,
+    },
+    stats: {
+      cheapOk: 0,
+      cheapFail: 0,
+      cheapSkipped: 0,
+      thinPages: 0,
+      firecrawlCalls: 0,
+      firecrawlOk: 0,
+      browserCalls: 0,
+      browserOk: 0,
+      crawl4aiCalls: 0,
+      crawl4aiOk: 0,
+      followed: 0,
     },
   };
 
@@ -628,13 +684,32 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
 
   const queue: string[] = [];
   const scheduled = new Set<string>();
-  const enqueue = (urls: string[]) => {
+  const enqueue = (
+    urls: string[],
+    channel: "seed" | "follow" = "seed",
+    opts?: { explainUnsafe?: boolean },
+  ) => {
+    let added = 0;
     for (const item of urls) {
       const key = canonicalUrl(item);
-      if (!key || scheduled.has(key) || SKIP_EXT.test(key) || !isPublicHttpUrl(key)) continue;
+      if (!key || scheduled.has(key) || SKIP_EXT.test(key)) continue;
+      if (!isPublicHttpUrl(key)) {
+        // The address the user typed still reaches scrapeOne, which refuses it
+        // before any socket. Discovered links stay dropped.
+        if (!opts?.explainUnsafe) continue;
+        try {
+          const parsed = new URL(key);
+          if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username) continue;
+        } catch {
+          continue;
+        }
+      }
       scheduled.add(key);
       queue.push(key);
+      added += 1;
     }
+    if (channel === "follow") ctx.stats.followed += added;
+    return added;
   };
 
   if (resolved === "capex") {
@@ -661,27 +736,40 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     };
     const recordNews = (news: Awaited<ReturnType<typeof searchCapexNews>>, started: number) => {
       const publishers = news.investment.filter((hit) => !isGoogleNewsHost(hit.url)).length;
+      const via = news.serpapiCalls ? ` · SerpAPI ${news.serpapiCalls} (reszta to RSS)` : "";
       discovery.push({
         id: "google-news",
         label: news.serpapiCalls
           ? "SerpAPI Google News + RSS (CapEx)"
           : "Google News RSS (szablony CapEx)",
-        status: news.investment.length ? "live" : "error",
+        status: hitOutcome(news.investment.length, news.investmentFailed, news.investmentQueries),
         hits: news.investment.length,
         durationMs: Date.now() - started,
-        message: news.investment.length
-          ? `${news.investment.length} newsów z ${news.investmentQueries} zapytań, ${publishers} linków wydawcy${news.serpapiCalls ? ` · SerpAPI ${news.serpapiCalls}` : ""}`
-          : "Brak newsów / błąd RSS",
+        message: emptySourceMessage({
+          hits: news.investment.length,
+          failed: news.investmentFailed,
+          attempts: news.investmentQueries,
+          filled: `${news.investment.length} newsów z ${news.investmentQueries} zapytań, ${publishers} linków wydawcy${via}`,
+          allFailed: `Błąd: ${news.investmentFailed}/${news.investmentQueries} zapytań news bez odpowiedzi (RSS${news.serpapiCalls ? " po nieudanym SerpAPI" : ""}).`,
+          partial: `Błąd części zapytań: ${news.investmentFailed}/${news.investmentQueries} nie doszło, reszta odpowiedziała pusto.${via}`,
+          empty: `Brak newsów. ${news.investmentQueries} zapytań RSS odpowiedziało pusto — to nie jest awaria źródła.`,
+        }),
       });
       discovery.push({
         id: "capex-press",
         label: "Prasa branżowa (site:)",
-        status: "live",
+        status: hitOutcome(news.press.length, news.pressFailed, news.pressQueries),
         hits: news.press.length,
         durationMs: Date.now() - started,
-        message: news.press.length
-          ? `${news.press.length} trafień z ${news.pressQueries} tytułów`
-          : `Brak trafień · ${news.pressQueries} szablonów site: (WNP, Puls Biznesu, automatyka, opakowania, przemysł)`,
+        message: emptySourceMessage({
+          hits: news.press.length,
+          failed: news.pressFailed,
+          attempts: news.pressQueries,
+          filled: `${news.press.length} trafień z ${news.pressQueries} tytułów${via}`,
+          allFailed: `Błąd prasy: ${news.pressFailed}/${news.pressQueries} szablonów site: bez odpowiedzi.`,
+          partial: `Część tytułów padła (${news.pressFailed}/${news.pressQueries}), reszta bez trafień.`,
+          empty: `Brak trafień. ${news.pressQueries} szablonów site: (WNP, Puls Biznesu, automatyka, opakowania, przemysł) odpowiedziało pusto.`,
+        }),
       });
     };
 
@@ -743,14 +831,14 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     discovery.push({
       id: "company-paths",
       label: "Ścieżki firmy",
-      status: paths.length ? "live" : "skipped",
+      status: paths.length ? "live" : probedOrigin ? "skipped" : "not_applicable",
       hits: paths.length,
       durationMs: probeMs,
       message: paths.length
         ? paths.map((url) => hostnamePath(url)).join(", ")
         : probedOrigin
-          ? `Brak HTTP 200 na ${COMPANY_SITE_PATHS.join(" ")} (${probedOrigin})`
-          : "Brak domeny firmy (URL użytkownika albo host wyników)",
+          ? `Żadna ze ścieżek ${COMPANY_SITE_PATHS.join(" ")} nie zwróciła HTTP 200 (${probedOrigin}).`
+          : "Nie dotyczy — brak domeny firmy (nie podano URL i nie wynika z wyników).",
     });
 
     const pathHits: SearchHit[] = paths.map((url) => ({
@@ -773,9 +861,20 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
   } else if (queryIsUrl && (resolved === "url" || resolved === "deep")) {
     const url = normalizeUrl(query);
     hits = [{ title: url, url, snippet: "Bezpośredni crawl URL", source: "direct" }];
-    enqueue([url]);
+    enqueue([url], "seed", { explainUnsafe: true });
+    discovery = [
+      {
+        id: "query-sources",
+        label: "Źródła zapytań",
+        status: "not_applicable",
+        hits: 0,
+        durationMs: 0,
+        message:
+          "Nie dotyczy — podano adres. SerpAPI, Wikipedia, DuckDuckGo, KRS i newsy nie były wołane. Poniżej jest pobranie tej strony.",
+      },
+    ];
   } else {
-    const found = await runDiscovery(query, { env, serpapiBudget });
+    const found = await runDiscovery(query, { env, fetchImpl: ctx.fetchImpl, serpapiBudget });
     hits = found.hits;
     discovery = found.runs;
     const seed = resolved === "deep" ? Math.min(LIMITS.deepSeedPages, targetPages) : targetPages;
@@ -822,8 +921,28 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
           4,
           2,
         ).map((link) => link.url);
-        enqueue(follow);
+        enqueue(follow, "follow");
       }
+    }
+    const thinCorpus =
+      sources.reduce((sum, source) => sum + source.wordCount, 0) < LIMITS.rescueMinWords;
+    if (
+      resolved === "search" &&
+      ctx.stats.followed === 0 &&
+      thinCorpus &&
+      timeLeft(ctx) > 8_000 &&
+      sources.length < targetPages
+    ) {
+      let room = Math.min(LIMITS.rescuePages, targetPages - sources.length);
+      for (const source of sources) {
+        if (room <= 0) break;
+        const internal = source.links
+          .filter((link) => !link.external)
+          .map((link) => ({ url: link.href }));
+        const picked = selectDiverse(internal, room, 1).map((link) => link.url);
+        room -= enqueue(picked, "follow");
+      }
+      if (queue.length) continue;
     }
     // CapEx drains company paths and publisher URLs. It does not follow internal links.
     if (resolved !== "deep" && resolved !== "capex") break;
@@ -872,15 +991,14 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
         source: "krs",
       });
     }
+    const krsRow = krsDiscoveryStatus(capexRegistry);
     discovery.push({
       id: "krs",
       label: "KRS (api-krs.ms.gov.pl)",
-      status: capexRegistry?.people.length ? "live" : "skipped",
+      status: krsRow.status,
       hits: capexRegistry?.people.length ?? 0,
       durationMs: capexKrsStarted ? Date.now() - capexKrsStarted : 0,
-      message: capexRegistry?.people.length
-        ? `${capexRegistry.people.length} osób (zarząd i prokurenci) · KRS ${capexRegistry.krs}`
-        : capexRegistry?.note || "Brak numeru KRS / NIP w zapytaniu i w treści",
+      message: krsRow.message,
     });
   }
 
@@ -897,23 +1015,6 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
   }
 
   const globalRuns: EngineRun[] = [...pageRuns];
-  if (enabled.has("crawlee")) {
-    globalRuns.push(
-      mkRun(
-        "crawlee",
-        "skipped",
-        Date.now() - t0,
-        `Niedostępny na serverless (brak workera Crawlee). Wbudowana kolejka SPECTRA: ${sources.length} stron, współbieżność ${LIMITS.scrapeConcurrency}, deduplikacja URL.`,
-        sources.length,
-      ),
-    );
-  }
-  if (enabled.has("scrapy")) {
-    globalRuns.push(mkRun("scrapy", "skipped", 0, adapterPosture("scrapy", env).message));
-  }
-  if (enabled.has("scrcpy")) {
-    globalRuns.push(mkRun("scrcpy", "skipped", 0, adapterPosture("scrcpy", env).message));
-  }
 
   const summarized = new Map(
     ENGINES.map((engine) => [
@@ -924,19 +1025,39 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
       ),
     ]),
   );
-  const engines: EngineRun[] = ENGINES.map((engine) => {
-    if (!enabled.has(engine.id)) return mkRun(engine.id, "skipped", 0, "Wyłączony w tym skanie");
-    const run = summarized.get(engine.id);
-    if (run && globalRuns.some((item) => item.id === engine.id)) return run;
-    const posture = adapterPosture(engine.id, env);
-    const message =
-      posture.status === "live"
-        ? "Klucz jest ustawiony, ale w tym skanie adapter nie został wywołany"
-        : posture.message;
-    return mkRun(engine.id, "skipped", 0, message);
-  });
+  const engines: EngineRun[] = ENGINES.filter((engine) => engine.surface !== "unavailable").map(
+    (engine) => {
+      if (!enabled.has(engine.id)) return mkRun(engine.id, "skipped", 0, "Wyłączony w tym skanie");
+      const run = summarized.get(engine.id);
+      if (run && globalRuns.some((item) => item.id === engine.id)) return run;
+      if (engine.surface === "optional") {
+        const posture = adapterPosture(engine.id, env);
+        return mkRun(
+          engine.id,
+          "skipped",
+          0,
+          posture.status === "live"
+            ? "Klucz jest ustawiony, ale w tym skanie usługa nie była wołana."
+            : "Pominięte — brak klucza. Darmowe źródła i lokalne pobranie działają bez tej usługi.",
+        );
+      }
+      return mkRun(
+        engine.id,
+        "not_applicable",
+        0,
+        "Nie dotyczy — nie pobrano strony, więc ten krok lokalny się nie wykonał.",
+      );
+    },
+  );
 
-  const effectiveness = scoreEffectiveness({ hits, sources, resolvedMode: resolved });
+  const corpus = sources.map((source) => `${source.title}\n${source.markdown}`).join("\n");
+  const coverage = queryCoverage(query, corpus);
+  const effectiveness = scoreEffectiveness({
+    hits,
+    sources,
+    resolvedMode: resolved,
+    coverage: coverage.ratio,
+  });
   const xai = getXaiStatus();
   let ai: SpectraResult["ai"] = {
     enabled: xai.available,
@@ -969,6 +1090,52 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     ai = { ...ai, capex: applyRegistryToCard(base, capexRegistry, company) };
   }
 
+  const cited = citationOverlap(ai.citations, [
+    ...hits.map((hit) => hit.url),
+    ...sources.map((source) => source.url),
+  ]);
+  const hosts = new Set(
+    sources
+      .map((source) => {
+        try {
+          return new URL(source.url).hostname;
+        } catch {
+          return "";
+        }
+      })
+      .filter(Boolean),
+  );
+  const stages = buildResearchStages({
+    mode: resolved,
+    query,
+    discovery,
+    hits: hits.length,
+    pages: sources.length,
+    cheapOk: ctx.stats.cheapOk,
+    cheapFail: ctx.stats.cheapFail,
+    cheapSkipped: ctx.stats.cheapSkipped,
+    thinPages: ctx.stats.thinPages,
+    firecrawlCalls: ctx.stats.firecrawlCalls,
+    firecrawlOk: ctx.stats.firecrawlOk,
+    browserCalls: ctx.stats.browserCalls,
+    browserOk: ctx.stats.browserOk,
+    crawl4aiCalls: ctx.stats.crawl4aiCalls,
+    crawl4aiOk: ctx.stats.crawl4aiOk,
+    followed: ctx.stats.followed,
+    words: sources.reduce((sum, source) => sum + source.wordCount, 0),
+    fields: sources.reduce((sum, source) => sum + source.structured.length, 0),
+    patterns: sources.reduce((sum, source) => sum + source.patterns.length, 0),
+    hosts: hosts.size,
+    httpOk: sources.filter((source) => source.statusCode > 0 && source.statusCode < 400).length,
+    coverage: coverage.ratio,
+    covered: coverage.covered,
+    missing: coverage.missing,
+    citationTotal: cited.total,
+    citationMatched: cited.matched,
+    useAi,
+    ai,
+  });
+
   return {
     query,
     mode,
@@ -976,6 +1143,7 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     hits,
     sources,
     engines,
+    stages,
     discovery,
     summary: buildSummary(query, resolved, hits, sources, discovery),
     totalDurationMs: Date.now() - t0,
@@ -985,3 +1153,4 @@ export async function runSpectra(req: SpectraRequest): Promise<SpectraResult> {
     effectiveness,
   };
 }
+

@@ -1,9 +1,10 @@
 import { ENGINE_MAP, type EngineId } from "../engines.ts";
 import { LIMITS } from "./limits.ts";
+import { redactSecrets } from "./redact.ts";
 import type { EngineRun, EngineStatus, ExtractedLink, StructuredField } from "./types.ts";
 
 export interface AdapterPosture {
-  status: Extract<EngineStatus, "live" | "degraded" | "skipped">;
+  status: Extract<EngineStatus, "live" | "degraded" | "skipped" | "not_applicable">;
   message: string;
   envKeys: string[];
 }
@@ -20,7 +21,7 @@ export function adapterPosture(id: EngineId, env: Env = process.env): AdapterPos
   const keySet = envKeys.some((key) => envHas(env, key));
 
   if (eng.runtime === "unavailable") {
-    return { status: "skipped", message: eng.runtimeNote, envKeys };
+    return { status: "not_applicable", message: eng.runtimeNote, envKeys };
   }
   if (eng.runtime === "optional") {
     if (!keySet) return { status: "skipped", message: eng.runtimeNote, envKeys };
@@ -149,7 +150,7 @@ export async function callFirecrawl(
     });
     const text = await res.text();
     if (!res.ok) {
-      return { error: `Firecrawl HTTP ${res.status}: ${text.slice(0, 180)}` };
+      return { error: `Firecrawl HTTP ${res.status}: ${redactSecrets(text).slice(0, 180)}` };
     }
     return parseFirecrawlPayload(JSON.parse(text) as unknown);
   } catch (err) {
@@ -214,7 +215,7 @@ export async function callBrowserUse(
       }),
     });
     const text = await res.text();
-    if (!res.ok) return { error: `Browser Use HTTP ${res.status}: ${text.slice(0, 180)}` };
+    if (!res.ok) return { error: `Browser Use HTTP ${res.status}: ${redactSecrets(text).slice(0, 180)}` };
     return parseBrowserUsePayload(JSON.parse(text) as unknown, url);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Browser Use niedostępny" };
@@ -281,7 +282,7 @@ export async function callCrawl4ai(
       body: JSON.stringify(body),
     });
     const text = await res.text();
-    if (!res.ok) return { error: `Crawl4AI HTTP ${res.status}: ${text.slice(0, 180)}` };
+    if (!res.ok) return { error: `Crawl4AI HTTP ${res.status}: ${redactSecrets(text).slice(0, 180)}` };
     return parseCrawl4aiPayload(JSON.parse(text) as unknown);
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Crawl4AI niedostępny" };

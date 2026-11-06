@@ -2,22 +2,25 @@ import type { EngineId } from "../engines.ts";
 import type { EngineRun, EngineStatus } from "./types.ts";
 
 const RANK: Record<EngineStatus, number> = {
-  live: 5,
-  degraded: 4,
-  error: 3,
-  skipped: 2,
+  live: 7,
+  local: 6,
+  degraded: 5,
+  error: 4,
+  skipped: 3,
+  not_applicable: 2,
   running: 1,
   pending: 0,
 };
 
 function winningStatus(runs: EngineRun[]): EngineStatus {
-  const hasLive = runs.some((r) => r.status === "live");
-  if (hasLive) return "live";
-  const hasDegraded = runs.some((r) => r.status === "degraded");
-  if (hasDegraded) return "degraded";
-  const hasError = runs.some((r) => r.status === "error");
-  if (hasError) return "error";
-  return "skipped";
+  if (runs.some((r) => r.status === "live")) return "live";
+  if (runs.some((r) => r.status === "local")) return "local";
+  if (runs.some((r) => r.status === "degraded")) return "degraded";
+  if (runs.some((r) => r.status === "error")) return "error";
+  if (runs.some((r) => r.status === "skipped")) return "skipped";
+  if (runs.some((r) => r.status === "not_applicable")) return "not_applicable";
+  if (runs.some((r) => r.status === "running")) return "running";
+  return "pending";
 }
 
 export function summarizeRuns(id: EngineId, runs: EngineRun[]): EngineRun {

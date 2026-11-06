@@ -2,7 +2,8 @@ import * as cheerio from "cheerio";
 import { LIMITS } from "./limits.ts";
 import { canonicalUrl, dedupeHits, fuseHits, type RankableHit } from "./rank.ts";
 import type { DiscoveryRun } from "./types.ts";
-import { CHROME_UA, SPECTRA_UA } from "./http.ts";
+import { CHROME_UA, publicFetch, SPECTRA_UA } from "./http.ts";
+import { redactSecrets } from "./redact.ts";
 import {
   SERPAPI_ENV_KEY,
   SerpapiBudget,
@@ -103,15 +104,26 @@ function looksLikeChallenge(html: string): boolean {
   return /captcha|anomaly|unfortunately, bots/i.test(html.slice(0, 4000));
 }
 
+/** Polish reason for a discovery failure. Does not include secrets. */
+export function explainDiscoveryFailure(id: string, label: string, err: unknown): string {
+  const raw = err instanceof Error ? err.message : "Błąd źródła";
+  const short = redactSecrets(raw.replace(/\s+/g, " ").trim()).slice(0, 160);
+  if (id === "duckduckgo" || id === "duckduckgo-lite") {
+    return `${label} niedostępny (${short}). Z centrum danych DuckDuckGo często zwraca 403 albo stronę blokady. Zostają Wikipedia, GitHub i pozostałe darmowe źródła.`;
+  }
+  if (/^HTTP \d+/.test(short)) return `${label}: ${short}`;
+  return short || "Błąd źródła";
+}
+
 async function getText(
   url: string,
   headers: Record<string, string>,
   fetchImpl: typeof fetch,
   signal: AbortSignal,
 ): Promise<string> {
-  const res = await fetchImpl(url, { headers, signal, redirect: "follow" });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const { response } = await publicFetch(url, { fetchImpl, headers, signal });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return text;
 }
 
@@ -427,7 +439,9 @@ export async function runDiscovery(
           status: "live",
           hits: hits.length,
           durationMs: Date.now() - t0,
-          message: hits.length ? `${hits.length} trafień` : "Brak trafień",
+          message: hits.length
+            ? `${hits.length} trafień`
+            : "Odpowiedź bez trafień — źródło działa, nic nie pasowało do zapytania.",
         });
       } catch (err) {
         runs.push({
@@ -436,7 +450,7 @@ export async function runDiscovery(
           status: "error",
           hits: 0,
           durationMs: Date.now() - t0,
-          message: err instanceof Error ? err.message.slice(0, 180) : "Błąd źródła",
+          message: explainDiscoveryFailure(provider.id, provider.label, err),
         });
       }
     }),

@@ -280,17 +280,23 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
-/** Heuristic effectiveness score without LLM */
+export const COLLECTION_DISCLAIMER =
+  "Ocena mierzy zebranie stron: trafienia, HTTP, długość i pola. Nie mierzy prawdy, pewności, sprzeczności źródeł ani tego, czy synteza wynika z tekstu.";
+
+/** Heuristic collection score. Token overlap is reported beside it and does not change the number. */
 export function scoreEffectiveness(input: {
   hits: SearchHit[];
   sources: SourceResult[];
   resolvedMode: string;
+  /** Share of query tokens found in fetched text, 0–1. Not used in the score. */
+  coverage?: number;
 }): {
   score: number;
   grade: "A" | "B" | "C" | "D" | "F";
-  factors: { label: string; ok: boolean; detail: string }[];
+  disclaimer: string;
+  factors: { label: string; ok: boolean; detail: string; kind?: "score" | "note" }[];
 } {
-  const factors: { label: string; ok: boolean; detail: string }[] = [];
+  const factors: { label: string; ok: boolean; detail: string; kind?: "score" | "note" }[] = [];
   let points = 0;
   let max = 0;
 
@@ -348,7 +354,17 @@ export function scoreEffectiveness(input: {
   const grade: "A" | "B" | "C" | "D" | "F" =
     score >= 85 ? "A" : score >= 70 ? "B" : score >= 55 ? "C" : score >= 40 ? "D" : "F";
 
-  return { score, grade, factors };
+  if (typeof input.coverage === "number" && Number.isFinite(input.coverage)) {
+    const pct = Math.round(Math.max(0, Math.min(1, input.coverage)) * 100);
+    factors.push({
+      label: "Słowa zapytania",
+      ok: false,
+      kind: "note",
+      detail: `${pct}% tokenów występuje dosłownie w pobranym tekście. To podobieństwo słów, nie weryfikacja faktów, pewność ani kompletność.`,
+    });
+  }
+
+  return { score, grade, disclaimer: COLLECTION_DISCLAIMER, factors };
 }
 
 /** Pull the optional `capex` card out of the model JSON; always return a full checklist. */

@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { capexDeepLink, capexInvestigateQuery } from "./capex-link.ts";
-import { CHROME_UA, isPublicHttpUrl, SPECTRA_UA } from "./http.ts";
+import { CHROME_UA, isPublicHttpUrl, publicFetch, SPECTRA_UA, type DnsLookup } from "./http.ts";
 import { extractRegistryIds, isValidNip, normalizeKrs } from "./krs.ts";
 import { canonicalUrl, dedupeHits, fuseHits, hostnameOf, type RankableHit } from "./rank.ts";
 import {
@@ -110,12 +110,13 @@ export async function googleNews(
 ): Promise<RankableHit[]> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=pl&gl=PL&ceid=PL:pl`;
-  const res = await fetchImpl(url, {
+  const { response } = await publicFetch(url, {
+    fetchImpl,
+    timeoutMs: opts.timeoutMs ?? 7_000,
     headers: { "User-Agent": SPECTRA_UA, Accept: "application/rss+xml, application/xml" },
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 7_000),
   });
-  if (!res.ok) throw new Error(`Google News HTTP ${res.status}`);
-  return parseGoogleNewsRss(await res.text(), opts.limit ?? 6);
+  if (!response.ok) throw new Error(`Google News HTTP ${response.status}`);
+  return parseGoogleNewsRss(await response.text(), opts.limit ?? 6);
 }
 
 /** True for news.google.com hosts. Those URLs are not article bodies. */
@@ -511,7 +512,7 @@ export function acceptCompanyPath(origin: string, finalUrl: string): string | nu
 /** GET the four company paths. Queue only HTTP 200 that stayed on the same host. */
 export async function probeCompanyPaths(
   origin: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; lookup?: DnsLookup } = {},
 ): Promise<string[]> {
   if (!isPublicHttpUrl(origin)) return [];
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -521,14 +522,14 @@ export async function probeCompanyPaths(
     COMPANY_SITE_PATHS.map(async (path) => {
       const requested = `${root}${path}`;
       try {
-        const res = await fetchImpl(requested, {
-          method: "GET",
-          redirect: "follow",
+        const { response, finalUrl } = await publicFetch(requested, {
+          fetchImpl,
+          timeoutMs,
+          lookup: opts.lookup,
           headers: { "User-Agent": CHROME_UA, Accept: "text/html" },
-          signal: AbortSignal.timeout(timeoutMs),
         });
-        if (res.status !== 200) return null;
-        const finalUrl = res.url.startsWith("http") ? res.url : requested;
+        await response.body?.cancel().catch(() => undefined);
+        if (response.status !== 200) return null;
         return acceptCompanyPath(root, finalUrl);
       } catch {
         return null;
@@ -577,6 +578,9 @@ export async function searchCapexNews(
   press: RankableHit[];
   investmentQueries: number;
   pressQueries: number;
+  /** Queries whose RSS (and SerpAPI, when it was tried) threw. An empty 200 is not a failure. */
+  investmentFailed: number;
+  pressFailed: number;
   serpapiCalls?: number;
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -589,7 +593,11 @@ export async function searchCapexNews(
   const pressQs = capexSiteQueries(company);
   let serpapiCalls = 0;
   /** Prefer SerpAPI google_news for the first few CapEx queries; RSS for the rest / fallback. */
-  const load = async (query: string, limit: number, preferSerpapi: boolean) => {
+  const load = async (
+    query: string,
+    limit: number,
+    preferSerpapi: boolean,
+  ): Promise<{ hits: RankableHit[]; failed: boolean }> => {
     if (preferSerpapi && useSerpapi && budget && budget.remainingCalls > 0) {
       try {
         const hits = await serpapiSearch({
@@ -603,15 +611,15 @@ export async function searchCapexNews(
           budget,
         });
         serpapiCalls += 1;
-        if (hits.length) return hits;
+        if (hits.length) return { hits, failed: false };
       } catch {
         /* fall through to free RSS */
       }
     }
     try {
-      return await googleNews(query, { fetchImpl, limit });
+      return { hits: await googleNews(query, { fetchImpl, limit }), failed: false };
     } catch {
-      return [] as RankableHit[];
+      return { hits: [], failed: true };
     }
   };
   const [investGroups, pressGroups] = await Promise.all([
@@ -619,11 +627,14 @@ export async function searchCapexNews(
     Promise.all(pressQs.map((site, index) => load(site.query, 3, index < 1))),
   ]);
   const investFused = fuseHits(
-    investGroups.map((hits) => ({ source: "google-news", hits })),
+    investGroups.map((group) => ({ source: "google-news", hits: group.hits })),
     company,
   ).slice(0, 8);
   const pressFused = fuseHits(
-    pressGroups.map((hits, index) => ({ source: `press:${pressQs[index]?.host ?? index}`, hits })),
+    pressGroups.map((group, index) => ({
+      source: `press:${pressQs[index]?.host ?? index}`,
+      hits: group.hits,
+    })),
     company,
   ).slice(0, 6);
   const [investment, press] = await Promise.all([
@@ -635,6 +646,8 @@ export async function searchCapexNews(
     press,
     investmentQueries: investQs.length,
     pressQueries: pressQs.length,
+    investmentFailed: investGroups.filter((group) => group.failed).length,
+    pressFailed: pressGroups.filter((group) => group.failed).length,
     serpapiCalls,
   };
 }
