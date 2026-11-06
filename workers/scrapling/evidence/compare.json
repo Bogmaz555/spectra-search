@@ -1,0 +1,239 @@
+{
+  "docker_executed": false,
+  "note": "Local process only. docker is not installed here, so the image was not built or run. max_rss_kb is this Python process and excludes Chromium. A separate Python-plus-Chrome sample during one browser fetch peaked at browser_peak_rss_kb.",
+  "max_rss_kb": 72256,
+  "rows": [
+    {
+      "url": "https://pl.wikipedia.org/wiki/Mlekovita",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://pl.wikipedia.org/wiki/Mlekovita",
+        "text_chars": 138967,
+        "marker_present": false,
+        "duration_ms": 41
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://pl.wikipedia.org/wiki/Mlekovita",
+        "title": "Spółdzielnia Mleczarska Mlekovita – Wikipedia, wolna encyklopedia",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [
+          {
+            "key": "Adres",
+            "value": "ul. Ludowa 122 18-200 Wysokie Mazowieckie"
+          },
+          {
+            "key": "Prezes",
+            "value": "Dariusz Sapiński"
+          },
+          {
+            "key": "Nr",
+            "value": "0000074309"
+          },
+          {
+            "key": "Zatrudnienie",
+            "value": "5300 (2025) [ 1 ]"
+          }
+        ],
+        "text_chars": 9128,
+        "marker_present": false,
+        "duration_ms": 302,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://pl.wikipedia.org/wiki/Sp%C3%B3%C5%82dzielnia_Mleczarska_Mlekovita",
+        "title": "Spółdzielnia Mleczarska Mlekovita – Wikipedia, wolna encyklopedia",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [
+          {
+            "key": "Adres",
+            "value": "ul. Ludowa 122 18-200 Wysokie Mazowieckie"
+          },
+          {
+            "key": "Prezes",
+            "value": "Dariusz Sapiński"
+          },
+          {
+            "key": "Nr",
+            "value": "0000074309"
+          },
+          {
+            "key": "Zatrudnienie",
+            "value": "5300 (2025) [ 1 ]"
+          }
+        ],
+        "text_chars": 9919,
+        "marker_present": false,
+        "duration_ms": 1971,
+        "error": null
+      }
+    },
+    {
+      "url": "https://mlekovita.com.pl/",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://mlekovita.com.pl/",
+        "text_chars": 526122,
+        "marker_present": false,
+        "duration_ms": 674
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://mlekovita.com.pl/",
+        "title": "MLEKOVITA – Twoja mleczna droga",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [],
+        "text_chars": 45228,
+        "marker_present": false,
+        "duration_ms": 643,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://mlekovita.com.pl/",
+        "title": "MLEKOVITA – Twoja mleczna droga",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [],
+        "text_chars": 48007,
+        "marker_present": false,
+        "duration_ms": 6033,
+        "error": null
+      }
+    },
+    {
+      "url": "https://quotes.toscrape.com/js/",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/js/",
+        "text_chars": 5806,
+        "marker_present": true,
+        "duration_ms": 88
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/js/",
+        "title": "Quotes to Scrape",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [],
+        "text_chars": 130,
+        "marker_present": false,
+        "duration_ms": 209,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://quotes.toscrape.com/js/",
+        "title": "Quotes to Scrape",
+        "quote_count": 10,
+        "first_quote": "“The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.”",
+        "headings": [],
+        "infobox": [],
+        "text_chars": 1571,
+        "marker_present": true,
+        "duration_ms": 1032,
+        "error": null
+      }
+    },
+    {
+      "url": "https://www.tygodnik-rolniczy.pl",
+      "baseline": {
+        "ok": true,
+        "status": 200,
+        "final_url": "https://www.tygodnik-rolniczy.pl",
+        "text_chars": 398964,
+        "marker_present": false,
+        "duration_ms": 490
+      },
+      "scrapling_http": {
+        "ok": true,
+        "library": "scrapling.fetchers.Fetcher",
+        "mode": "http",
+        "status": 200,
+        "final_url": "https://www.tygodnik-rolniczy.pl/",
+        "title": "Tygodnik Poradnik Rolniczy - portal rolniczy. Rolnictwo i wieś",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [],
+        "text_chars": 22645,
+        "marker_present": false,
+        "duration_ms": 554,
+        "error": null
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "library": "scrapling.fetchers.StealthyFetcher",
+        "mode": "browser",
+        "status": 200,
+        "final_url": "https://www.tygodnik-rolniczy.pl/",
+        "title": "Tygodnik Poradnik Rolniczy - portal rolniczy. Rolnictwo i wieś",
+        "quote_count": 0,
+        "first_quote": null,
+        "headings": [],
+        "infobox": [],
+        "text_chars": 23264,
+        "marker_present": false,
+        "duration_ms": 5684,
+        "error": null
+      }
+    },
+    {
+      "url": "https://investmap.pl/",
+      "note": "Publisher named by Google News RSS for Mlekovita inwestycja. Measured in a follow-up call, not the first loop.",
+      "baseline": null,
+      "scrapling_http": {
+        "ok": true,
+        "status": 200,
+        "text_chars": 9708,
+        "duration_ms": 1426,
+        "title": "Investmap.pl - wiadomości o rynku nieruchomości oraz ogłoszenia",
+        "quote_count": 0,
+        "headings": [],
+        "infobox": []
+      },
+      "scrapling_browser": {
+        "ok": true,
+        "status": 200,
+        "text_chars": 9814,
+        "duration_ms": 15225,
+        "quote_count": 0,
+        "headings": [],
+        "infobox": [],
+        "only_extra_visible_line": "Nasza strona korzysta z plików cookies zgodnie z regulaminem i polityką prywatności."
+      }
+    }
+  ],
+  "browser_peak_rss_kb": 1221896
+}
