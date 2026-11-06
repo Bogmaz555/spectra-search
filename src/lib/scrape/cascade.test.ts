@@ -39,6 +39,8 @@ function facts(partial: Partial<CascadeFacts>): CascadeFacts {
     coverage: 0,
     covered: [],
     missing: [],
+    citationTotal: 0,
+    citationMatched: 0,
     useAi: false,
     ai: aiOff,
     ...partial,
@@ -140,6 +142,9 @@ test("stages stay honest when cheap fetch is enough", () => {
   assert.equal(stages[4].status, "local");
   assert.match(stages[4].provenance, /MarkItDown|AutoScraper/);
   assert.equal(stages[5].status, "local");
+  assert.match(stages[5].label, /Słowa/);
+  assert.match(stages[5].contribution, /nie jest weryfikacja faktów/);
+  assert.match(stages[5].output, /Nie zaimplementowano/);
   assert.match(stages[5].provenance, /grok-4\.3/);
 });
 

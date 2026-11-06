@@ -17,9 +17,12 @@ import {
   isPublicHttpUrl,
   isPublicHttpUrlResolved,
   looksBlocked,
+  publicFetch,
   resilientGet,
   robotsDisallows,
 } from "./http.ts";
+import { redactSecrets } from "./redact.ts";
+import { COLLECTION_DISCLAIMER, scoreEffectiveness } from "../xai.ts";
 import { resolveMode } from "./mode.ts";
 import { canonicalUrl, dedupeHits, fuseHits, selectDiverse } from "./rank.ts";
 
@@ -137,6 +140,50 @@ test("DNS answers that point at private or mapped addresses are rejected", async
     }),
     false,
   );
+});
+
+test("word overlap does not change the collection score and is not called verification", () => {
+  const base = {
+    hits: [{ title: "A", url: "https://example.com", snippet: "", source: "wikipedia-pl" }],
+    sources: [],
+    resolvedMode: "search",
+  };
+  const low = scoreEffectiveness({ ...base, coverage: 0 });
+  const high = scoreEffectiveness({ ...base, coverage: 1 });
+  assert.equal(low.score, high.score);
+  assert.equal(low.grade, high.grade);
+  assert.equal(high.disclaimer, COLLECTION_DISCLAIMER);
+  const note = high.factors.find((factor) => factor.kind === "note");
+  assert.match(note?.detail ?? "", /nie weryfikacja faktów/);
+});
+
+test("redirect to a private address is not requested", async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url === "https://public.example/start") {
+      return new Response("", { status: 302, headers: { location: "http://169.254.169.254/latest" } });
+    }
+    return new Response("secret", { status: 200 });
+  };
+  await assert.rejects(
+    () =>
+      publicFetch("https://public.example/start", {
+        fetchImpl,
+        lookup: async (host) => (host === "public.example" ? ["93.184.216.34"] : ["169.254.169.254"]),
+      }),
+    /odrzucony/,
+  );
+  assert.deepEqual(calls, ["https://public.example/start"]);
+});
+
+test("secret-shaped fragments are stripped from provider errors", () => {
+  const raw = "SerpAPI HTTP 401: invalid api_key=super-secret-value Bearer abc.def";
+  const clean = redactSecrets(raw);
+  assert.equal(clean.includes("super-secret-value"), false);
+  assert.equal(clean.includes("abc.def"), false);
+  assert.match(clean, /api_key=\*\*\*/);
 });
 
 test("robots.txt redirect to a private target is not fetched", async () => {

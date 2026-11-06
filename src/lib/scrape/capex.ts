@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { capexDeepLink, capexInvestigateQuery } from "./capex-link.ts";
-import { CHROME_UA, isPublicHttpUrl, SPECTRA_UA } from "./http.ts";
+import { CHROME_UA, isPublicHttpUrl, publicFetch, SPECTRA_UA, type DnsLookup } from "./http.ts";
 import { extractRegistryIds, isValidNip, normalizeKrs } from "./krs.ts";
 import { canonicalUrl, dedupeHits, fuseHits, hostnameOf, type RankableHit } from "./rank.ts";
 import {
@@ -110,12 +110,13 @@ export async function googleNews(
 ): Promise<RankableHit[]> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=pl&gl=PL&ceid=PL:pl`;
-  const res = await fetchImpl(url, {
+  const { response } = await publicFetch(url, {
+    fetchImpl,
+    timeoutMs: opts.timeoutMs ?? 7_000,
     headers: { "User-Agent": SPECTRA_UA, Accept: "application/rss+xml, application/xml" },
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 7_000),
   });
-  if (!res.ok) throw new Error(`Google News HTTP ${res.status}`);
-  return parseGoogleNewsRss(await res.text(), opts.limit ?? 6);
+  if (!response.ok) throw new Error(`Google News HTTP ${response.status}`);
+  return parseGoogleNewsRss(await response.text(), opts.limit ?? 6);
 }
 
 /** True for news.google.com hosts. Those URLs are not article bodies. */
@@ -511,7 +512,7 @@ export function acceptCompanyPath(origin: string, finalUrl: string): string | nu
 /** GET the four company paths. Queue only HTTP 200 that stayed on the same host. */
 export async function probeCompanyPaths(
   origin: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; lookup?: DnsLookup } = {},
 ): Promise<string[]> {
   if (!isPublicHttpUrl(origin)) return [];
   const fetchImpl = opts.fetchImpl ?? fetch;
@@ -521,14 +522,14 @@ export async function probeCompanyPaths(
     COMPANY_SITE_PATHS.map(async (path) => {
       const requested = `${root}${path}`;
       try {
-        const res = await fetchImpl(requested, {
-          method: "GET",
-          redirect: "follow",
+        const { response, finalUrl } = await publicFetch(requested, {
+          fetchImpl,
+          timeoutMs,
+          lookup: opts.lookup,
           headers: { "User-Agent": CHROME_UA, Accept: "text/html" },
-          signal: AbortSignal.timeout(timeoutMs),
         });
-        if (res.status !== 200) return null;
-        const finalUrl = res.url.startsWith("http") ? res.url : requested;
+        await response.body?.cancel().catch(() => undefined);
+        if (response.status !== 200) return null;
         return acceptCompanyPath(root, finalUrl);
       } catch {
         return null;

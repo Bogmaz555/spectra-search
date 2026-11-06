@@ -1,6 +1,7 @@
 import { canonicalUrl, type RankableHit } from "./rank.ts";
 import { SPECTRA_UA } from "./http.ts";
 import { LIMITS } from "./limits.ts";
+import { redactSecrets } from "./redact.ts";
 
 export const SERPAPI_ENV_KEY = "SERPAPI_API_KEY";
 export const SERPAPI_ENDPOINT = "https://serpapi.com/search.json";
@@ -143,7 +144,7 @@ export async function serpapiSearch(opts: SerpapiSearchOpts): Promise<RankableHi
     throw err;
   }
   if (!res.ok) {
-    const err = new Error(`SerpAPI HTTP ${res.status}: ${text.slice(0, 120)}`);
+    const err = new Error(`SerpAPI HTTP ${res.status}: ${redactSecrets(text).slice(0, 120)}`);
     if (budget) budget.lastError = err.message;
     throw err;
   }

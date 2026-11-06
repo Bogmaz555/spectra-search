@@ -396,7 +396,7 @@ function HomePage() {
               Zapytanie: <span className="text-fg-muted">{result.query}</span>
               {" · "}
               {formatDuration(result.totalDurationMs)}
-              {" · skuteczność "}
+              {" · zebranie "}
               <span className="text-fg-muted">
                 {result.effectiveness.score}/100 ({result.effectiveness.grade})
               </span>
@@ -502,7 +502,11 @@ function HowToSearchCard({
         </li>
       </ol>
       <div className="mt-4 rounded-[var(--radius-md)] border border-border/80 bg-bg-elevated px-3 py-2.5 text-xs leading-relaxed text-fg-subtle">
-        <p className="font-medium text-fg-muted">Skuteczność (orientacyjnie)</p>
+        <p className="font-medium text-fg-muted">Zebranie (nie prawda)</p>
+        <p className="mt-1">
+          Ocena mówi, czy udało się zebrać strony. Powtórzenie słów zapytania nie potwierdza faktów.
+          Sprzeczności źródeł i zgodność syntezy z tekstem nie są sprawdzane.
+        </p>
         <p className="mt-1">URL / dokumentacja publiczna: bardzo wysoka.</p>
         <p>Zapytania ogólne: dobra (zależna od discovery + blokad).</p>
         <p>SPA za logowaniem / silny antybot: ograniczona bez headless browser.</p>

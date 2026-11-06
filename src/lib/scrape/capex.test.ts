@@ -194,7 +194,10 @@ test("probeCompanyPaths queues only the paths that return 200", async () => {
     }
     return new Response("ok", { status: 200 });
   };
-  const queued = await probeCompanyPaths("https://firma.pl", { fetchImpl });
+  const queued = await probeCompanyPaths("https://firma.pl", {
+    fetchImpl,
+    lookup: async () => ["93.184.216.34"],
+  });
   assert.ok(queued.includes("https://firma.pl/aktualnosci"));
   assert.ok(queued.includes("https://firma.pl/o-nas"));
   assert.equal(queued.includes("https://firma.pl/kontakt"), false);

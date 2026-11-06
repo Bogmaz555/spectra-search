@@ -14,7 +14,7 @@ Kolejność jest stała. Płatne wywołanie startuje tylko wtedy, gdy poprzedni 
 | Trudna strona | Firecrawl, Browser Use i Crawl4AI tylko dla strony cienkiej albo zablokowanej i tylko gdy jest klucz oraz został budżet. Bogata strona nie generuje drugiego płatnego requestu. | Brak klucza nie jest oznaczany jako sukces Cheerio pod cudzą nazwą. |
 | Ograniczone zejście | Własna kolejka: deduplikacja URL, limit hostów, współbieżność, budżet czasu. Deep schodzi w linki wewnętrzne. Szukaj dokłada najwyżej dwie strony, gdy treść ma mniej niż 80 słów. CapEx czyta zaplanowane URL-e i nie chodzi po całej witrynie. | Nie jest Crawlee ani Scrapy. |
 | Ekstrakcja | Cheerio: markdown, meta, linki, heurystyka list. Normalizacja już wyciągniętego tekstu. | Nie czyta PDF ani Office. Nie uczy selektorów z przykładu. |
-| Weryfikacja | Licznik tokenów zapytania w pobranym tekście i liczba hostów — zawsze. Grok tylko z `XAI_API_KEY`, domyślnie model `grok-4.3` (`XAI_MODEL` może go nadpisać). | Licznik pokrycia nie jest odpowiedzią modelu. |
+| Słowa zapytania | Licznik tokenów zapytania w pobranym tekście. Grok tylko z `XAI_API_KEY`, domyślnie `grok-4.3`. | To podobieństwo słów, nie prawda, pewność ani kompletność. Wykrywanie sprzeczności i sprawdzanie, czy twierdzenia syntezy wynikają z tekstu, nie są zaimplementowane. |
 
 Każdy etap w wyniku niesie wejście, wyjście, wkład względem poprzedniego kroku, powód pominięcia i pochodzenie implementacji.
 

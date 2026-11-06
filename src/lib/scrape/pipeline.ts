@@ -39,7 +39,7 @@ import {
   type KrsRegistry,
 } from "./krs.ts";
 import { emptySourceMessage, hitOutcome } from "./outcome.ts";
-import { buildResearchStages, countWords, queryCoverage } from "./cascade.ts";
+import { buildResearchStages, citationOverlap, countWords, queryCoverage } from "./cascade.ts";
 import {
   extractDocument,
   htmlToMarkdown,
@@ -312,13 +312,24 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       if ("error" in page) {
         runs.push(mkRun("firecrawl", "error", Date.now() - t0, page.error));
       } else {
+        const returned = canonicalUrl(page.sourceUrl) ?? finalUrl;
+        if (!(await isPublicHttpUrlResolved(returned))) {
+          runs.push(
+            mkRun(
+              "firecrawl",
+              "error",
+              Date.now() - t0,
+              "Firecrawl wskazał adres prywatny albo lokalny — treść odrzucona",
+            ),
+          );
+        } else {
         fromFirecrawl = true;
         ctx.stats.firecrawlOk += 1;
         if (page.html) html = page.html;
         if (page.markdown) markdown = page.markdown;
         title = page.title || title;
         description = page.description || description;
-        finalUrl = canonicalUrl(page.sourceUrl) ?? finalUrl;
+        finalUrl = returned;
         statusCode = page.statusCode || statusCode || 200;
         if (page.html) contentType = "text/html";
         else if (page.markdown) contentType = "text/markdown";
@@ -333,6 +344,7 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
             page.fields.length,
           ),
         );
+        }
       }
     }
   }
@@ -380,10 +392,21 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
       if ("error" in page) {
         runs.push(mkRun("browser-use", "error", Date.now() - t0, page.error));
       } else {
+        const returned = canonicalUrl(page.finalUrl) ?? url;
+        if (!(await isPublicHttpUrlResolved(returned))) {
+          runs.push(
+            mkRun(
+              "browser-use",
+              "error",
+              Date.now() - t0,
+              "Browser Use wskazał adres prywatny albo lokalny — treść odrzucona",
+            ),
+          );
+        } else {
         ctx.stats.browserOk += 1;
         html = page.body;
         markdown = "";
-        finalUrl = canonicalUrl(page.finalUrl) ?? page.finalUrl;
+        finalUrl = returned;
         statusCode = page.statusCode || statusCode;
         contentType = page.contentType || "text/html";
         runs.push(
@@ -395,6 +418,7 @@ async function scrapeOne(rawUrl: string, ctx: ScrapeCtx): Promise<SourceResult> 
             1,
           ),
         );
+        }
       }
     }
   }
@@ -1066,6 +1090,10 @@ export async function runSpectra(
     ai = { ...ai, capex: applyRegistryToCard(base, capexRegistry, company) };
   }
 
+  const cited = citationOverlap(ai.citations, [
+    ...hits.map((hit) => hit.url),
+    ...sources.map((source) => source.url),
+  ]);
   const hosts = new Set(
     sources
       .map((source) => {
@@ -1102,6 +1130,8 @@ export async function runSpectra(
     coverage: coverage.ratio,
     covered: coverage.covered,
     missing: coverage.missing,
+    citationTotal: cited.total,
+    citationMatched: cited.matched,
     useAi,
     ai,
   });
@@ -1123,3 +1153,4 @@ export async function runSpectra(
     effectiveness,
   };
 }
+

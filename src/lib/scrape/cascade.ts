@@ -1,3 +1,4 @@
+import { canonicalUrl } from "./rank.ts";
 import type { DiscoveryRun, ResearchStage, SpectraAi } from "./types.ts";
 
 export const CASCADE_STEPS: { id: ResearchStage["id"]; label: string; role: string }[] = [
@@ -28,8 +29,8 @@ export const CASCADE_STEPS: { id: ResearchStage["id"]; label: string; role: stri
   },
   {
     id: "verify",
-    label: "Weryfikacja",
-    role: "Pokrycie tokenów zapytania i różnorodność hostów zawsze. Grok (grok-4.3, o ile nie nadpisano XAI_MODEL) tylko gdy jest klucz i synteza jest włączona.",
+    label: "Słowa zapytania",
+    role: "Liczy, czy tokeny zapytania występują w tekście. To nie jest weryfikacja faktów. Grok (grok-4.3, o ile nie nadpisano XAI_MODEL) może streścić materiał, ale jego odpowiedź nie jest sprawdzana pod kątem prawdy. Sprzeczności źródeł nie są wykrywane.",
   },
 ];
 
@@ -57,6 +58,22 @@ const STOP = new Set([
 
 export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+/** How many cited URLs are addresses we actually collected. Not a check of the quoted claim. */
+export function citationOverlap(
+  citations: { url: string }[],
+  allowedUrls: string[],
+): { total: number; matched: number } {
+  const allowed = new Set(
+    allowedUrls.map((url) => canonicalUrl(url)).filter((url): url is string => Boolean(url)),
+  );
+  let matched = 0;
+  for (const citation of citations) {
+    const key = canonicalUrl(citation.url);
+    if (key && allowed.has(key)) matched += 1;
+  }
+  return { total: citations.length, matched };
 }
 
 /** How much of the query shows up in fetched text. Digits (KRS, NIP) count. */
@@ -100,6 +117,9 @@ export interface CascadeFacts {
   coverage: number;
   covered: string[];
   missing: string[];
+  /** Citations whose URL is one of the collected hits or pages. Address overlap only. */
+  citationTotal: number;
+  citationMatched: number;
   useAi: boolean;
   ai: Pick<SpectraAi, "used" | "model" | "error" | "citations">;
 }
@@ -314,6 +334,18 @@ export function buildResearchStages(facts: CascadeFacts): ResearchStage[] {
         );
 
   const coveragePct = Math.round(facts.coverage * 100);
+  const lexical = `Pokrycie słów ${coveragePct}% — tokeny zapytania znalezione dosłownie w tekście. To nie jest weryfikacja faktów, pewność ani kompletność.`;
+  const gaps = facts.missing.length
+    ? `Luka słowna (nie luka wiedzy): brak ${facts.missing.slice(0, 8).join(", ")}.`
+    : "Wszystkie tokeny zapytania występują w tekście. To nadal tylko zgodność słów.";
+  const cites =
+    facts.citationTotal > 0
+      ? `${facts.citationMatched}/${facts.citationTotal} cytowań wskazuje na zebrany adres. Zgodność adresu nie sprawdza treści twierdzenia.`
+      : facts.ai.used
+        ? "Synteza nie ma cytowań. Nie sprawdzono, czy twierdzenia wynikają ze źródeł."
+        : "Synteza nie wchodzi do tej metryki.";
+  const notChecked =
+    "Nie zaimplementowano: wykrywania sprzecznych źródeł oraz sprawdzania, czy twierdzenia syntezy wynikają z tekstu.";
   const verify =
     facts.pages === 0 && facts.hits === 0
       ? stage(
@@ -321,30 +353,21 @@ export function buildResearchStages(facts: CascadeFacts): ResearchStage[] {
           "skipped",
           facts.query,
           "Brak materiału.",
-          "Nie ma czego sprawdzać.",
-          "Lokalne pokrycie tokenów; Grok tylko z XAI_API_KEY.",
+          "Nie ma tekstu, w którym można szukać słów zapytania.",
+          "Licznik słów. Nie weryfikuje faktów. Grok tylko z XAI_API_KEY i bez sprawdzania prawdy.",
           "Discovery i pobranie nic nie przyniosły.",
         )
-      : facts.ai.used
-        ? stage(
-            "verify",
-            "live",
-            `${facts.pages} stron · pokrycie ${coveragePct}% · ${facts.hosts} hostów`,
-            `Grok ${facts.ai.model}: ${facts.ai.citations.length} cytowań. Tokeny: ${facts.covered.join(", ") || "—"}.`,
-            "Odpowiedź modelu na zebranym materiale plus licznik pokrycia, który nie zależy od modelu.",
-            `xAI ${facts.ai.model}. Pokrycie tokenów liczy SPECTRA, nie model.`,
-          )
-        : stage(
-            "verify",
-            "local",
-            facts.query,
-            `Pokrycie ${coveragePct}% (${facts.covered.length} z ${facts.covered.length + facts.missing.length}). Brakuje: ${facts.missing.slice(0, 8).join(", ") || "—"}. HTTP OK ${facts.httpOk}/${facts.pages}.`,
-            "Wiadomo, które słowa zapytania mają oparcie w tekście, zanim ktokolwiek włączy model.",
-            facts.useAi
-              ? `Grok nie oddał odpowiedzi${facts.ai.error ? ` (${facts.ai.error})` : ""}. Zostaje licznik pokrycia.`
-              : "Synteza Grok wyłączona albo brak XAI_API_KEY. Domyślny model, gdy klucz jest: grok-4.3.",
-            facts.useAi && facts.ai.error ? facts.ai.error : "Model nie był potrzebny do tej metryki.",
-          );
+      : stage(
+          "verify",
+          "local",
+          facts.query,
+          `${lexical} ${gaps} ${cites} ${notChecked}`,
+          lexical,
+          facts.ai.used
+            ? `Grok ${facts.ai.model} odpowiedział i nie został sprawdzony. Licznik słów liczy SPECTRA.`
+            : "Synteza Grok wyłączona albo brak XAI_API_KEY. Domyślny model, gdy klucz jest: grok-4.3. Licznik słów nie jest odpowiedzią modelu.",
+          notChecked,
+        );
 
   return [discovery, fetch, fallback, deep, extract, verify];
 }

@@ -70,7 +70,11 @@ test("text query keeps working sources when DuckDuckGo is blocked and does not c
   assert.equal(result.stages[2]?.status, "skipped");
   assert.ok(result.sources.length >= 1);
   assert.equal(calls.some((url) => url.includes("serpapi.com")), false);
-  assert.ok(result.effectiveness.factors.some((factor) => factor.label === "Pokrycie zapytania"));
+  const words = result.effectiveness.factors.find((factor) => factor.label === "Słowa zapytania");
+  assert.equal(words?.kind, "note");
+  assert.match(words?.detail ?? "", /nie weryfikacja faktów/);
+  assert.match(result.effectiveness.disclaimer, /Nie mierzy prawdy/);
+  assert.match(result.stages.find((stage) => stage.id === "verify")?.output ?? "", /Nie zaimplementowano/);
 });
 
 test("a rich page does not spend Firecrawl or Crawl4AI even when keys are set", async () => {

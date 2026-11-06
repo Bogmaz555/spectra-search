@@ -121,9 +121,11 @@ export interface SpectraAi {
 }
 
 export interface EffectivenessReport {
+  /** Collection heuristic, 0–100. Not truth, confidence, or completeness of facts. */
   score: number;
   grade: "A" | "B" | "C" | "D" | "F";
-  factors: { label: string; ok: boolean; detail: string }[];
+  disclaimer: string;
+  factors: { label: string; ok: boolean; detail: string; kind?: "score" | "note" }[];
 }
 
 /** One step of the research cascade. Status names only what actually ran. */
