@@ -258,7 +258,7 @@ export async function callCrawl4ai(
   const cloudKey = opts.env.CRAWL4AI_API_KEY?.trim();
   const token = opts.env.CRAWL4AI_API_TOKEN?.trim();
   let endpoint = "";
-  let headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
   let body: Record<string, unknown> = { url };
 
   if (base) {
