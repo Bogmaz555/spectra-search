@@ -168,7 +168,7 @@ test("NIP on the VAT whitelist is followed by a KRS extract", async () => {
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
     calls.push(url);
-    if (url.includes("wykazpodatnikowvat")) {
+    if (url.includes("/search/nip/")) {
       return new Response(
         JSON.stringify({
           result: { subject: { name: "PRZYKŁAD", nip: "7740001454", krs: "123456" } },
