@@ -1,5 +1,6 @@
 import type { CapexPerson } from "./capex.ts";
 import { SPECTRA_UA } from "./http.ts";
+import { getMfVatWlSearchNipPrefixes } from "./mf-vat-wl.ts";
 import type { SourceResult } from "./types.ts";
 
 /**
@@ -11,10 +12,6 @@ export const CEIDG_LIMIT_NOTE =
   "CEIDG: nie odpytujemy. Odczyt działalności osoby fizycznej (JDG) wymaga tokenu Biznes.gov.pl i osobnego OK. Sam NIP bez numeru KRS nie wciąga zarządu.";
 
 const KRS_ORIGIN = "https://api-krs.ms.gov.pl/api/krs/OdpisAktualny";
-const VAT_HOSTS = [
-  "https://wykazpodatnikowvat.mf.gov.pl/api/search/nip",
-  "https://wl-api.mf.gov.pl/api/search/nip",
-];
 const NIP_WEIGHTS = [6, 5, 7, 2, 3, 4, 5, 6, 7];
 
 export interface KrsRegistry {
@@ -236,8 +233,8 @@ async function krsFromNip(
 ): Promise<{ krs?: string; name?: string; nip?: string; note?: string }> {
   const date = warsawDate(opts.now);
   let lastError = "brak odpowiedzi";
-  for (const base of VAT_HOSTS) {
-    const url = `${base}/${nip}?date=${date}`;
+  for (const prefix of getMfVatWlSearchNipPrefixes()) {
+    const url = `${prefix}/${nip}?date=${date}`;
     try {
       const res = await opts.fetchImpl(url, {
         headers: { Accept: "application/json", "User-Agent": SPECTRA_UA },
