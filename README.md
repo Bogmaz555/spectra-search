@@ -43,6 +43,10 @@ Kaskada: odkrywanie → tanie pobranie → płatny fallback tylko dla cienkiej s
 - Better Auth
 - Vercel (Nitro, `maxDuration` 180s)
 
+## Wdrożenie
+
+Produkcja buduje się przez integrację Vercel z gitem (push na `main`). Workflow GitHub „Deploy to Vercel” został tylko do ręcznego uruchomienia (`workflow_dispatch`) i wymaga sekretu z tokenem Vercel, którego celowo nie dodajemy.
+
 ## Lokalnie
 
 ```bash
