@@ -1,0 +1,10 @@
+# Host publish is loopback only. Do not add a tunnel or 0.0.0.0:8765.
+services:
+  scrapling-worker:
+    build: .
+    environment:
+      WORKER_IN_DOCKER: "1"
+    ports:
+      - "127.0.0.1:8765:8765"
+    mem_limit: 2g
+    pids_limit: 256
